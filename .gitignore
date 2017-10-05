@@ -1,0 +1,7 @@
+*.xml
+*.iml
+*.pyc
+data
+weights
+src/unit_test.csv
+src/unit_test2.csv
