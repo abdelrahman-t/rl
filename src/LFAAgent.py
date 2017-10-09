@@ -4,19 +4,15 @@ from Utilities import *
 
 
 def reward(agent):
-    r, terminalStateReward = 0, (1.0e2, -1.0e2)
-    hDrift, wPositionX, wPositionY = 0.01, 1, 1
-
-    s1 = agent.getState()
-    s0 = s1.prevState
-    g = agent.getGoal()
+    terminalStateReward = (1.0e2, -1.0e2)
+    wPositionX = wPositionY = 1
+    g, s1 = agent.getGoal(), agent.getState()
 
     if agent.isTerminal():
         r = terminalStateReward[0] if agent.isGoal(agent) else terminalStateReward[1]
     else:
-        if round(agent.getHDistance(s1.position, s0.position), 2) > hDrift:
-            # −(αx(x − x∗) **2 + αy(y − y∗) **2)
-            r += -(wPositionX * (s1.position.x - g.position.x) ** 2 + (wPositionY * (s1.position.y - g.position.y) ** 2))
+        # −(αx(x − x∗) **2 + αy(y − y∗) **2)
+        r = -(wPositionX * (s1.position[0] - g.position[0]) ** 2 + (wPositionY * (s1.position[1] - g.position[1]) ** 2))
 
     return r
 
@@ -27,12 +23,8 @@ def Q(state, actionId):
 
 
 # fix state aliasing caused by the depth sensor
-def fixDepthAliasing(agent): pass
-
-
-def hDistanceGoal(agent):
-    return ((agent.getGoal().position.x - agent.getState().position.x) ** 2 +
-            (agent.getGoal().position.y - agent.getState().position.y) ** 2) ** 0.5
+def fixDepthAliasing(agent):
+    pass
 
 
 def eGreedy(state, actionsIds, epsilon=0.05):
@@ -106,8 +98,7 @@ def main():
     # another)
     # state is lazily updated by the environment as the agent needs it , agent always get the freshest estimate of the state
     # state updates are done by the environment in a rate that corresponds to agent decision making freq.
-    agent.defineState(position=RLAgent.getPosition, rollPitchYaw=RLAgent.getRollPitchYaw, hDistanceNearestObs=RLAgent.hDistanceNearestObs,
-                      hDistanceGoal=hDistanceGoal)
+    agent.defineState(position=RLAgent.getPosition, rollPitchYaw=RLAgent.getRollPitchYaw, hDistanceGoal=hDistanceGoal)
 
     agent.setGoal(position=np.array([4, 5, 0]), rollPitchYaw=np.array([0, 0, 0]))
     agent.setGoalMargins(position=np.array([10, 10, math.inf]), rollPitchYaw=np.array([math.inf, math.inf, math.inf]))
@@ -117,6 +108,7 @@ def main():
     agent.setRl(sarsa)
     agent.setReward(reward)
     agent.start()
+
 
 if __name__ == '__main__':
     main()

@@ -59,8 +59,8 @@ class TestUtilities(unittest.TestCase):
             averageVelocity = getAverageLinearVelocity(nextPosition, initialPosition, frequency)
             self.assertTrue(np.allclose(nextPosition, integratePosition(initialPosition, averageVelocity, frequency)))
 
-    def test_integrateTrajectory(self):
-        df = pd.read_csv('unit_test.csv')
+    def test_integrateTrajectoryWithVelocity(self):
+        df = pd.read_csv('unit_test2.csv')
 
         f = df['f'].values
         position = ['x', 'y', 'z']
@@ -81,7 +81,8 @@ class TestUtilities(unittest.TestCase):
         gen = integrateTrajectory(initialPositions[0], initialOrientations[0], vBody_avg, angularVelocities_avg, f)
         for i in range(df.shape[0]):
             j = next(gen)
-            self.assertTrue(np.allclose(j, nextPositions[i]), (j, nextPositions[i], i))
+            self.assertTrue(np.allclose(j, nextPositions[i]), (j - nextPositions[i], i))
+
 
 if __name__ == '__main__':
     unittest.main()

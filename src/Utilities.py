@@ -140,7 +140,8 @@ class State:
 
     def areEqual(self, state, margins):
         for key in state.callbacks:
-            if abs(getattr(self, key) - getattr(state, key)) > getattr(margins, key):
+            diff = abs(getattr(self, key) - getattr(state, key))
+            if (np.greater(diff, getattr(margins, key))).any():
                 return False
         return True
 

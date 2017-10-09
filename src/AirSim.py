@@ -400,6 +400,12 @@ class MultirotorClient(AirSimClientBase):
     def getAngularVelocity(self):
         return Vector3r.from_msgpack(self.client.call('getAngularVelocity'))
 
+    def getAngularAcceleration(self):
+        return Vector3r.from_msgpack(self.client.call('getAngularAcceleration'))
+
+    def getLinearAcceleration(self):
+        return Vector3r.from_msgpack(self.client.call('getLinearAcceleration'))
+
     def getOrientation(self):
         return Quaternionr.from_msgpack(self.client.call('getOrientation'))
 

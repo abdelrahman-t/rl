@@ -7,8 +7,8 @@ from abc import ABCMeta, abstractmethod
 class RLAgent(threading.Thread):
     __metaclass__ = ABCMeta
 
-    def __init__(self, name, serverIpAddress='127.0.0.1', defaultSpeed=3, defaultAltitude=1.5, yawRate=70,
-                 decisionFrequency=10, learningRate=0.01, discount=1, crashRecoveryPeriod=16, logFlight=False,
+    def __init__(self, name, model=None, maxDepth=20, initialState=None, serverIpAddress='127.0.0.1', defaultSpeed=3, defaultAltitude=1.5,
+                 yawRate=70, decisionFrequency=10, learningRate=0.01, discount=1, crashRecoveryPeriod=16, logFlight=False,
                  logFileName=getDateTime().strip()):
 
         threading.Thread.__init__(self, name=name)
@@ -31,16 +31,28 @@ class RLAgent(threading.Thread):
                                                   on_release=partial(self.onRelease, token=self.keyPressed))
 
         self.keyboardListener.start()
+        self.model = model
+        self.maxDepth, self.timeStep = maxDepth, 0
+        self.initialState = initialState
+
+        if self.model:
+            self.performAction = lambda _: None
+            self.reset = lambda: None
+            self.isTerminal = lambda: self.timeStep >= self.maxDepth
 
     def initialize(self):
-        self.initializeConnection()
-        moveByVelocityZ = partial(self.client.moveByVelocityZ, vx=0, vy=0, z=-self.defaultAltitude, yaw_mode=YawMode(True, 0),
-                                  duration=10.0, drivetrain=DrivetrainType.MaxDegreeOfFreedom)
+        if self.model:
+            self.state = self.model.initialize(self.initialState)
+            self.actions = {'moveForward': None, 'yawCW': None, 'yawCCW': None, 'hover': None}
+        else:
+            self.initializeConnection()
+            moveByVelocityZ = partial(self.client.moveByVelocityZ, vx=0, vy=0, z=-self.defaultAltitude, yaw_mode=YawMode(True, 0),
+                                      duration=10.0, drivetrain=DrivetrainType.MaxDegreeOfFreedom)
 
-        self.actions = {'moveForward': self.moveForward, 'yawCW': partial(self.yaw, self.yawRate),
-                        'yawCCW': partial(self.yaw, -self.yawRate), 'hover': moveByVelocityZ}
+            self.actions = {'moveForward': self.moveForward, 'yawCW': partial(self.yaw, self.yawRate),
+                            'yawCCW': partial(self.yaw, -self.yawRate), 'hover': moveByVelocityZ}
 
-        self.initializeState()
+            self.initializeState()
 
     def initializeConnection(self):
         try:
@@ -93,6 +105,14 @@ class RLAgent(threading.Thread):
         return kwargs['agent'].client.getAngularVelocity().toNumpyArray()
 
     @staticmethod
+    def getAngularAcceleration(**kwargs):
+        return kwargs['agent'].client.getAngularAcceleration().toNumpyArray()
+
+    @staticmethod
+    def getLinearAcceleration(**kwargs):
+        return kwargs['agent'].client.getLinearAcceleration().toNumpyArray()
+
+    @staticmethod
     def getCurrentAction(**kwargs):
         return kwargs['agent'].currentAction
 
@@ -123,13 +143,13 @@ class RLAgent(threading.Thread):
 
     def moveForward(self):
         # The attitude in the aeronautical frame (right-handed, Z-down, X-front, Y-right).
-        q = self.getOrientation(agent=self)
         velocityEarth = np.array([self.defaultSpeed, 0, 0])
-        velocityBody = self.rotateVector(q, velocityEarth)
+        velocityBody = self.rotateVector(self.getOrientation(agent=self), velocityEarth)
         self.performAction(partial(self.actions['hover'], vx=velocityBody[0], vy=velocityBody[1]))
 
     def yaw(self, rate):
-        velocityEarth = self.getVelocity(agent=self)
+        # this is a hack!!
+        velocityEarth = self.getState().linearVelocity
         self.performAction(partial(self.actions['hover'], vx=velocityEarth[0], vy=velocityEarth[1], yaw_mode=YawMode(True, rate)))
 
     def isTerminal(self):
@@ -145,7 +165,10 @@ class RLAgent(threading.Thread):
         return self.goal
 
     def updateState(self):
-        self.state = self.state.updateState(self)
+        if self.model:
+            self.state = self.model.updateState(state=self.getState(), action=self.currentAction)
+        else:
+            self.state = self.state.updateState(self)
 
     def getActions(self, all=False):
         # all parameter=true will return all actions the agents have regardless of context, as some actions might not be accessible to the
@@ -191,8 +214,10 @@ class RLAgent(threading.Thread):
         stateKeys = self.getState().getKeys()
         flightLogger(stateKeys)
 
-        t, period = 0, 1 / self.decisionFrequency
+        self.timeStep, period, error = 0, 1 / self.decisionFrequency, 0
         while True:
+            if self.model is None and self.timeStep == 0:
+                self.updateState()
             start = time.time()
             # give turn to the agent
             a = callback.__next__()
@@ -201,9 +226,10 @@ class RLAgent(threading.Thread):
             self.currentAction = a
 
             # delay to match agent's decision freq.
-            while time.time() - start < period:
+            while time.time() - start < period - error:
                 continue
 
+            start = time.time()
             # state is lazily updated by the environment as the agent needs it , agent always get the freshest estimate of the state
             # state updates are done by the environment in a rate that corresponds to agent decision making freq.
             self.updateState()
@@ -214,12 +240,14 @@ class RLAgent(threading.Thread):
             callback.__next__()
             callback.send((r, s, isTerminal))
 
-            if t % self.decisionFrequency == 0:
+            if self.timeStep % self.decisionFrequency == 0:
                 self.logger.debug((['{}={}'.format(key, getattr(s, key)) for key in stateKeys], isTerminal))
 
             flightLogger(s)
 
             if self.isTerminal():
+                if self.model:
+                    break
                 # disarm agent
                 self.performAction(self.client.disarm)
                 # reset environment
@@ -227,7 +255,8 @@ class RLAgent(threading.Thread):
                 # get agent into initial state
                 self.initializeState()
 
-            t += 1
+            error = (time.time() - start)
+            self.timeStep += 1
 
     def saveProgress(self, progress, fileName, append=False):
         try:
