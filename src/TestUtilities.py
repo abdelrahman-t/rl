@@ -60,7 +60,7 @@ class TestUtilities(unittest.TestCase):
             self.assertTrue(np.allclose(nextPosition, integratePosition(initialPosition, averageVelocity, frequency)))
 
     def test_integrateTrajectoryWithVelocity(self):
-        df = pd.read_csv('unit_test2.csv')
+        df = pd.read_csv('unit_test.csv')
 
         f = df['f'].values
         position = ['x', 'y', 'z']

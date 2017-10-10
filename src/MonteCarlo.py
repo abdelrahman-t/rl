@@ -35,26 +35,27 @@ def monteCarloSearch(agent, callback):
         yield
 
 
-def monteCarlo(agent, maxDepth=30):
+def monteCarlo(agent, maxDepth=10):
     model = VelocityModel(model=joblib.load('linearModel.model'), frequency=10)
     while True:
         start = time.time()
         initialState, isTerminal = agent.getState(), False
         while isTerminal is False:
             qs, actions = OrderedDict(), agent.getActions()
-            for a in actions:
+            qs.update([(i, []) for i in actions])
+            for a in np.repeat(actions, 10):
                 virtualAgent, isTerminal = RLAgent('virtual', model=model, decisionFrequency=math.inf,
                                                    maxDepth=maxDepth, initialState=initialState), False
                 virtualAgent.setReward(reward)
-                virtualAgent.setGoal(position=np.array([40, 50, 0]))
+                virtualAgent.setGoal(position=np.array([-40, -50, 0]))
                 virtualAgent.setGoalMargins(position=np.array([0.5, 0.5, math.inf]))
-                virtualAgent.setRl(partial(monteCarloSearch, callback=lambda q: qs.update([(a, q)])))
+                virtualAgent.setRl(partial(monteCarloSearch, callback=lambda q: qs[a].append(q)))
                 virtualAgent.start()
                 virtualAgent.join()
 
-            yield actions[np.argmax([qs[a] for a in actions])]
+            yield actions[np.argmax([np.average(qs[a]) for a in actions])]
             r, nextState, isTerminal = (yield)
-            agent.logger.info((nextState.goal, r, int(1 / (time.time()-start))))
+            agent.logger.info((nextState.goal, int(1 / (time.time()-start))))
             yield
 
 
@@ -70,7 +71,7 @@ def main():
 
     agent.setRl(monteCarlo)
     agent.setReward(reward)
-    agent.setGoal(position=np.array([40, 50, 0]))
+    agent.setGoal(position=np.array([-40, -50, 0]))
     agent.setGoalMargins(position=np.array([0.5, 0.5, math.inf]))
     agent.start()
 
