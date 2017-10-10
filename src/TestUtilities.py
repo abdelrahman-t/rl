@@ -11,7 +11,7 @@ class TestUtilities(unittest.TestCase):
         return [i + suffix for i in l]
 
     def test_quaternionConversion(self):
-        df = pd.read_csv('unit_test.csv')
+        df = pd.read_csv('unit_test2.csv')
         euler = ['psi', 'theta', 'phi']
         quaternion = ['scalar', 'i', 'j', 'k']
 
@@ -22,7 +22,7 @@ class TestUtilities(unittest.TestCase):
             self.assertTrue(np.allclose(toEulerianAngle(eulerToQuaternion(*e)), e))
 
     def test_rotation(self):
-        df = pd.read_csv('unit_test.csv')
+        df = pd.read_csv('unit_test2.csv')
 
         quaternion = ['scalar', 'i', 'j', 'k']
         v = ['dX', 'dY', 'dZ']
@@ -36,7 +36,7 @@ class TestUtilities(unittest.TestCase):
             self.assertTrue(np.allclose(transformToEarthFrame(vBody, q_), vE))
 
     def test_integrateOrientation(self):
-        df = pd.read_csv('unit_test.csv')
+        df = pd.read_csv('unit_test2.csv')
 
         orientation = ['psi', 'theta', 'phi']
         p0 = df[self.addSuffix(orientation, '0')].values
@@ -48,7 +48,7 @@ class TestUtilities(unittest.TestCase):
             self.assertTrue(np.allclose(nextPosition, integrateOrientation(initialPosition, averageVelocity, frequency)))
 
     def test_integratePosition(self):
-        df = pd.read_csv('unit_test.csv')
+        df = pd.read_csv('unit_test2.csv')
 
         position = ['x', 'y', 'z']
         p0 = df[self.addSuffix(position, '0')].values
@@ -60,7 +60,7 @@ class TestUtilities(unittest.TestCase):
             self.assertTrue(np.allclose(nextPosition, integratePosition(initialPosition, averageVelocity, frequency)))
 
     def test_integrateTrajectoryWithVelocity(self):
-        df = pd.read_csv('unit_test.csv')
+        df = pd.read_csv('unit_test2.csv')
 
         f = df['f'].values
         position = ['x', 'y', 'z']

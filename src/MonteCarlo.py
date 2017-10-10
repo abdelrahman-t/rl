@@ -35,7 +35,7 @@ def monteCarloSearch(agent, callback):
         yield
 
 
-def monteCarlo(agent, maxDepth=10):
+def monteCarlo(agent, maxDepth=15):
     model = VelocityModel(model=joblib.load('linearModel.model'), frequency=10)
     while True:
         start = time.time()
@@ -55,7 +55,9 @@ def monteCarlo(agent, maxDepth=10):
 
             yield actions[np.argmax([np.average(qs[a]) for a in actions])]
             r, nextState, isTerminal = (yield)
-            agent.logger.info((nextState.goal, int(1 / (time.time()-start))))
+            f = 1 / (time.time() - start)
+            model.frequency = f
+            agent.logger.info((nextState.goal, int(f)))
             yield
 
 
