@@ -94,6 +94,7 @@ def generateGaussianNoise(std, mean=0):
     return np.random.normal(scale=std, loc=mean)
 
 
+# https://stackoverflow.com/questions/2320986/easy-way-to-keeping-angles-between-179-and-180-degrees
 def wrapAroundPi(angle):
     return np.arctan2(np.sin(angle), np.cos(angle))
 
