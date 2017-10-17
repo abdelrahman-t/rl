@@ -88,6 +88,9 @@ class RLAgent(threading.Thread):
     def setGoalMargins(self, **kwargs):
         self.goalMargins = State(update=False, **kwargs)
 
+    def getGoalMargins(self):
+        return self.goalMargins
+
     @staticmethod
     def getPosition(**kwargs):
         return kwargs['agent'].client.getPosition().toNumpyArray()

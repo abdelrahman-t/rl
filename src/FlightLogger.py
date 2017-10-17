@@ -5,7 +5,7 @@ from RLAgent import *
 from Utilities import *
 
 
-def flightLogger(agent, dataset=None, baseFrequency=10):
+def flightLogger(agent, dataset=None, baseFrequency=0):
     keymap = defaultdict(lambda: 'hover')
     keymap.update([('Key.up', 'moveForward'), ('Key.left', 'yawCCW'), ('Key.right', 'yawCW'), ('Key.down', 'hover')])
     inverseKeymap = {'moveForward': 8, 'yawCCW': 4, 'yawCW': 6, 'hover': 5}
@@ -36,87 +36,50 @@ def flightLogger(agent, dataset=None, baseFrequency=10):
 
             f = 1 / (time.time() - start)
 
-            linearVelocityE0, linearVelocityE1 = initialState.linearVelocity, nextState.linearVelocity
-            linearVelocityB0, linearVelocityB1 = initialState.orientation.rotate(linearVelocityE0), nextState.orientation.rotate(
-                linearVelocityE1)
+            linearVelocityEarth = nextState.linearVelocity
+            linearVelocityBody = nextState.orientation.rotate(linearVelocityEarth)
 
-            linearAccelerationE0, linearAccelerationE1 = initialState.linearAcceleration, nextState.linearAcceleration
-            linearAccelerationB0, linearAccelerationB1 = initialState.orientation.rotate(
-                linearAccelerationE0), nextState.orientation.rotate(linearAccelerationE1)
+            linearAccelerationEarth = nextState.linearAcceleration
+            linearAccelerationBody = nextState.orientation.rotate(linearAccelerationEarth)
 
-            euler0, euler1 = getRollPitchYaw(initialState.orientation), getRollPitchYaw(nextState.orientation)
+            orientationEuler = getRollPitchYaw(nextState.orientation)
 
             records = {
                 # [time-step, frequency, numerical value of selected action, action description]
                 't': timeStep, 'f': f, 's': timeStep // agent.decisionFrequency, 'aIndex': inverseKeymap[selectedAction],
                 'aName': selectedAction,
-
-                # -----------------
-                # absolute initial position [Unreal Engine]
-                'x0': initialState.position[0], 'y0': initialState.position[1], 'z0': initialState.position[2],
-
-                # -----------------
-                # initial Linear Velocities in Body, Earth [Instantaneous]
-                'dXB0': linearVelocityB0[0], 'dYB0': linearVelocityB0[1], 'dZB0': linearVelocityB0[2],
-                'dXE0': linearVelocityE0[0], 'dYE0': linearVelocityE0[1], 'dZE0': linearVelocityE0[2],
-
-                # -----------------
-                # initial Linear Accelerations in Body, Earth [Instantaneous]
-                'd2XB0': linearAccelerationB0[0], 'd2YB0': linearAccelerationB0[1], 'd2ZB0': linearAccelerationB0[2],
-                'd2XE0': linearAccelerationE0[0], 'd2YE0': linearAccelerationE0[1], 'd2ZE0': linearAccelerationE0[2],
-
-                # ----------------
-                # initial Orientation [(roll, pitch, yaw) or (x, y, z)]
-                'psi0': euler0[0], 'theta0': euler0[1], 'phi0': euler0[2],
-
-                # ----------------
-                # initial Orientation [Quaternion]
-                'scalar0': initialState.orientation[0], 'i0': initialState.orientation[1], 'j0': initialState.orientation[2],
-                'k0': initialState.orientation[3],
-
-                # ----------------
-                # initial Angular Velocities [Instantaneous]
-                'dPsi0': initialState.angularVelocity[0], 'dTheta0': initialState.angularVelocity[1],
-                'dPhi0': initialState.angularVelocity[2],
-
-                # ----------------
-                # initial Angular Accelerations [Instantaneous]
-                'd2Psi0': initialState.angularAcceleration[0], 'd2Theta0': initialState.angularAcceleration[1],
-                'd2Phi0': initialState.angularAcceleration[2],
-
                 # -----------------
                 # absolute next position [Unreal Engine]
-                'x1': nextState.position[0], 'y1': nextState.position[1], 'z1': nextState.position[2],
+                'x': nextState.position[0], 'y': nextState.position[1], 'z': nextState.position[2],
 
                 # -----------------
                 # next Linear Velocities in Body, Earth [Instantaneous]
-                'dXB1': linearVelocityB1[0], 'dYB1': linearVelocityB1[1], 'dZB1': linearVelocityB1[2],
-                'dXE1': linearVelocityE1[0], 'dYE1': linearVelocityE1[1], 'dZE1': linearVelocityE1[2],
+                'dXB': linearVelocityBody[0], 'dYB': linearVelocityBody[1], 'dZB': linearVelocityBody[2],
+                'dXE': linearVelocityEarth[0], 'dYE': linearVelocityEarth[1], 'dZE': linearVelocityEarth[2],
 
                 # -----------------
                 # next Linear Accelerations in Body, Earth [Instantaneous]
-                'd2XB1': linearAccelerationB1[0], 'd2YB1': linearAccelerationB1[1], 'd2ZB1': linearAccelerationB1[2],
-                'd2XE1': linearAccelerationE1[0], 'd2YE1': linearAccelerationE1[1], 'd2ZE1': linearAccelerationE1[2],
+                'd2XB': linearAccelerationBody[0], 'd2YB': linearAccelerationBody[1], 'd2ZB': linearAccelerationBody[2],
+                'd2XE': linearAccelerationEarth[0], 'd2YE': linearAccelerationEarth[1], 'd2ZE': linearAccelerationEarth[2],
 
                 # ----------------
                 # next Orientation [(roll, pitch, yaw) or (x, y, z)]
-                'psi1': euler1[0], 'theta1': euler1[1], 'phi1': euler1[2],
+                'psi': orientationEuler[0], 'theta': orientationEuler[1], 'phi': orientationEuler[2],
 
                 # ----------------
                 # next Orientation [Quaternion]
-                'scalar1': nextState.orientation[0], 'i1': nextState.orientation[1], 'j1': nextState.orientation[2],
-                'k1': nextState.orientation[3],
+                'scalar': nextState.orientation[0], 'i': nextState.orientation[1], 'j': nextState.orientation[2],
+                'k': nextState.orientation[3],
 
                 # ----------------
                 # next Angular Velocities [instantaneous]
-                'dPsi1': nextState.angularVelocity[0], 'dTheta1': nextState.angularVelocity[1],
-                'dPhi1': nextState.angularVelocity[2],
+                'dPsi': nextState.angularVelocity[0], 'dTheta': nextState.angularVelocity[1], 'dPhi': nextState.angularVelocity[2],
                 # ----------------
 
                 # ----------------
                 # next Angular Accelerations [instantaneous]
-                'd2Psi1': nextState.angularAcceleration[0], 'd2Theta1': nextState.angularAcceleration[1],
-                'd2Phi1': nextState.angularAcceleration[2]
+                'd2Psi': nextState.angularAcceleration[0], 'd2Theta': nextState.angularAcceleration[1],
+                'd2Phi': nextState.angularAcceleration[2]
                 # ----------------
             }
 
@@ -134,7 +97,7 @@ def flightLogger(agent, dataset=None, baseFrequency=10):
 
 
 def main():
-    agent = RLAgent('agent', decisionFrequency=10.0, defaultSpeed=4, defaultAltitude=6, yawRate=70)
+    agent = RLAgent('agent', decisionFrequency=0.0, defaultSpeed=4, defaultAltitude=6, yawRate=70)
 
     # callbacks will be called in the order they were specified, beware of order of execution (if any state parameter is dependant on
     # another)

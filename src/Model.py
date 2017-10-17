@@ -12,11 +12,10 @@ class VelocityModel:
         s1, s0 = initialState, initialState.prevState
 
         orientation1, orientation0 = getRollPitchYaw(s1.orientation), getRollPitchYaw(s0.orientation)
-        angularVelocity = getAverageAngularVelocity(orientation1, orientation0, self.frequency)
-        linearVelocity = transformToBodyFrame(getAverageLinearVelocity(s1.position, s0.position, self.frequency), s1.orientation)
+        linearVelocity = transformToBodyFrame(s1.linearVelocity, s1.orientation)
 
         return State(update=False, position=s1.position, orientation=orientation1, linearVelocity=linearVelocity,
-                     angularVelocity=angularVelocity)
+                     angularVelocity=s1.angularVelocity)
 
     def getState(self):
         return self.state

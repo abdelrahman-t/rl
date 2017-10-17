@@ -4,6 +4,8 @@ from Model import *
 
 from sklearn.externals import joblib
 
+from queue import Queue
+
 
 def horizontalDistanceGoal(**kwargs):
     return ((kwargs['agent'].getGoal().position[0] - kwargs['partialUpdate'].position[0]) ** 2 +
@@ -35,23 +37,27 @@ def monteCarloSearch(agent, callback):
         yield
 
 
-def monteCarlo(agent, maxDepth=15):
+# to do: use multiprocessing instead of threading as GIL renders the threaded approach useless!!
+# thread-safety is not enforced, code is only thread-safe on CPython
+def monteCarlo(agent, maxDepth=15, trials=10):
     model = VelocityModel(model=joblib.load('linearModel.model'), frequency=10)
     while True:
         start = time.time()
         initialState, isTerminal = agent.getState(), False
         while isTerminal is False:
-            qs, actions = OrderedDict(), agent.getActions()
+            queue_, qs, actions = Queue(), OrderedDict(), agent.getActions()
             qs.update([(i, []) for i in actions])
-            for a in np.repeat(actions, 10):
+            for a in np.repeat(actions, trials):
+                queue_.put(a)
                 virtualAgent, isTerminal = RLAgent('virtual', model=model, decisionFrequency=math.inf,
                                                    maxDepth=maxDepth, initialState=initialState), False
                 virtualAgent.setReward(reward)
-                virtualAgent.setGoal(position=np.array([-40, -50, 0]))
-                virtualAgent.setGoalMargins(position=np.array([0.5, 0.5, math.inf]))
-                virtualAgent.setRl(partial(monteCarloSearch, callback=lambda q: qs[a].append(q)))
+                virtualAgent.goal = agent.getGoal()
+                virtualAgent.goalMargins = agent.getGoalMargins()
+                virtualAgent.setRl(partial(monteCarloSearch, callback=lambda q: (qs[a].append(q), queue_.get(), queue_.task_done())))
                 virtualAgent.start()
-                virtualAgent.join()
+
+            queue_.join()
 
             yield actions[np.argmax([np.average(qs[a]) for a in actions])]
             r, nextState, isTerminal = (yield)
