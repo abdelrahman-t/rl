@@ -5,11 +5,10 @@ from RLAgent import *
 from Utilities import *
 
 
-def flightLogger(agent, dataset=None, baseFrequency=0):
+def flightLogger(agent, dataset=None, baseFrequency=10):
     keymap = defaultdict(lambda: 'hover')
     keymap.update([('Key.up', 'moveForward'), ('Key.left', 'yawCCW'), ('Key.right', 'yawCW'), ('Key.down', 'hover')])
     inverseKeymap = {'moveForward': 8, 'yawCCW': 4, 'yawCW': 6, 'hover': 5}
-    timeStep = 1
 
     try:
         df = pd.read_csv(dataset)
@@ -19,10 +18,9 @@ def flightLogger(agent, dataset=None, baseFrequency=0):
     except Exception as e:
         pass
 
-    writer = None
+    writer, timeStep = None, 1
     with open(getDateTime().strip() + '.csv', 'w') as csvfile:
         while True:
-            start = time.time()
             initialState, a = agent.getState(), agent.keyPressed.value
 
             try:
@@ -33,8 +31,7 @@ def flightLogger(agent, dataset=None, baseFrequency=0):
 
             yield selectedAction
             r, nextState, isTerminal = (yield)
-
-            f = 1 / (time.time() - start)
+            f = 1 / (nextState.lastUpdate - initialState.lastUpdate)
 
             linearVelocityEarth = nextState.linearVelocity
             linearVelocityBody = nextState.orientation.rotate(linearVelocityEarth)
@@ -97,7 +94,7 @@ def flightLogger(agent, dataset=None, baseFrequency=0):
 
 
 def main():
-    agent = RLAgent('agent', decisionFrequency=0.0, defaultSpeed=4, defaultAltitude=6, yawRate=70)
+    agent = RLAgent('agent', decisionFrequency=10.0, defaultSpeed=4, defaultAltitude=6, yawRate=70)
 
     # callbacks will be called in the order they were specified, beware of order of execution (if any state parameter is dependant on
     # another)
@@ -109,6 +106,7 @@ def main():
 
     agent.setRl(partial(flightLogger, dataset='C:/Users/talaa/Desktop/out.csv'))
     agent.start()
+    agent.join()
 
 
 if __name__ == '__main__':

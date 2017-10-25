@@ -4,7 +4,6 @@ from Utilities import *
 class VelocityModel:
     def __init__(self, model, frequency):
         self.model = model
-        self.state = None
         self.frequency = frequency
         self.inverseKeymap = {'moveForward': 8, 'yawCCW': 4, 'yawCW': 6, 'hover': 5}
 
@@ -16,9 +15,6 @@ class VelocityModel:
 
         return State(update=False, position=s1.position, orientation=orientation1, linearVelocity=linearVelocity,
                      angularVelocity=s1.angularVelocity)
-
-    def getState(self):
-        return self.state
 
     def updateState(self, state, action):
         x = np.concatenate((state.linearVelocity, state.angularVelocity, state.orientation[:-1], [self.inverseKeymap[action]]))
@@ -32,3 +28,16 @@ class VelocityModel:
 
         return State(update=False, position=position, orientation=orientation, linearVelocity=linearVelocity,
                      angularVelocity=angularVelocity)
+
+
+class AccelerationModel:
+    def __init__(self, model, frequency):
+        self.model = model
+        self.frequency = frequency
+        self.inverseKeymap = {'moveForward': 8, 'yawCCW': 4, 'yawCW': 6, 'hover': 5}
+
+    def initialize(self, initialState):
+        pass
+
+    def updateState(self, state, action):
+        pass

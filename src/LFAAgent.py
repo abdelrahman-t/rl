@@ -94,21 +94,6 @@ def sarsa(agent, checkpointsIntervals=60 * 5):
 def main():
     agent = RLAgent('agent', decisionFrequency=15, defaultSpeed=5, discount=1, learningRate=0.05, crashRecoveryPeriod=14)
 
-    # callbacks will be called in the order they were specified, beware of order of execution (if any state parameter is dependant on
-    # another)
-    # state is lazily updated by the environment as the agent needs it , agent always get the freshest estimate of the state
-    # state updates are done by the environment in a rate that corresponds to agent decision making freq.
-    agent.defineState(position=RLAgent.getPosition, rollPitchYaw=RLAgent.getRollPitchYaw, hDistanceGoal=hDistanceGoal)
-
-    agent.setGoal(position=np.array([4, 5, 0]), rollPitchYaw=np.array([0, 0, 0]))
-    agent.setGoalMargins(position=np.array([10, 10, math.inf]), rollPitchYaw=np.array([math.inf, math.inf, math.inf]))
-
-    # states where agent perception is aliased or impaired should be terminal as agent should avoid these states at all costs
-    agent.addTerminal(lambda a: True if a.getState().hDistanceNearestObs == 0 else False)
-    agent.setRl(sarsa)
-    agent.setReward(reward)
-    agent.start()
-
 
 if __name__ == '__main__':
     main()

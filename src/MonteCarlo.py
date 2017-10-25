@@ -27,7 +27,8 @@ def reward(agent):
 
 
 def monteCarloSearch(agent, callback):
-    q, qs, policy = 0.0, dict(), lambda: np.random.randint(0, 4)
+    policy, q = lambda: np.random.randint(0, 4), 0.0
+
     while True:
         yield agent.getActions()[policy()]
         r, nextState, isTerminal = (yield)
@@ -39,32 +40,34 @@ def monteCarloSearch(agent, callback):
 
 # to do: use multiprocessing instead of threading as GIL renders the threaded approach useless!!
 # thread-safety is not enforced, code is only thread-safe on CPython
-def monteCarlo(agent, maxDepth=15, trials=10):
-    model = VelocityModel(model=joblib.load('linearModel.model'), frequency=10)
+def monteCarlo(agent, maxDepth=15, trials=10, frequency=10):
+    model = VelocityModel(model=joblib.load('linearModel.model'), frequency=frequency)
     while True:
-        start = time.time()
         initialState, isTerminal = agent.getState(), False
         while isTerminal is False:
-            queue_, qs, actions = Queue(), OrderedDict(), agent.getActions()
-            qs.update([(i, []) for i in actions])
+            actions = agent.getActions()
+            queue_, qs = Queue(), {i: [] for i in actions}
+
             for a in np.repeat(actions, trials):
-                queue_.put(a)
                 virtualAgent, isTerminal = RLAgent('virtual', model=model, decisionFrequency=math.inf,
                                                    maxDepth=maxDepth, initialState=initialState), False
                 virtualAgent.setReward(reward)
                 virtualAgent.goal = agent.getGoal()
                 virtualAgent.goalMargins = agent.getGoalMargins()
                 virtualAgent.setRl(partial(monteCarloSearch, callback=lambda q: (qs[a].append(q), queue_.get(), queue_.task_done())))
+
+                queue_.put(a)
                 virtualAgent.start()
 
             queue_.join()
-
             yield actions[np.argmax([np.average(qs[a]) for a in actions])]
             r, nextState, isTerminal = (yield)
-            f = 1 / (time.time() - start)
+
+            f = 1 / (nextState.lastUpdate - initialState.lastUpdate)
+            # correct for deviations from desired freq.
             model.frequency = f
-            agent.logger.info((nextState.goal, int(f)))
-            yield
+
+            yield agent.logger.info((nextState.goal, int(f)))
 
 
 def main():
@@ -82,6 +85,7 @@ def main():
     agent.setGoal(position=np.array([-40, -50, 0]))
     agent.setGoalMargins(position=np.array([0.5, 0.5, math.inf]))
     agent.start()
+    agent.join()
 
 
 if __name__ == '__main__':

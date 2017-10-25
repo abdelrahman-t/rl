@@ -133,10 +133,6 @@ class RLAgent(threading.Thread):
                 (p1.y - p2.y) ** 2) ** 0.5
 
     @staticmethod
-    def rotateVector(quaternion, vector):
-        return quaternion.rotate(vector)
-
-    @staticmethod
     def onPress(key, token):
         token.update(key)
 
@@ -147,11 +143,13 @@ class RLAgent(threading.Thread):
     def moveForward(self):
         # The attitude in the aeronautical frame (right-handed, Z-down, X-front, Y-right).
         velocityEarth = np.array([self.defaultSpeed, 0, 0])
-        velocityBody = self.rotateVector(self.getOrientation(agent=self), velocityEarth)
+
+        # temporary hack for performance
+        velocityBody = transformToBodyFrame(velocityEarth, self.getState().orientation)
         self.performAction(partial(self.actions['hover'], vx=velocityBody[0], vy=velocityBody[1]))
 
     def yaw(self, rate):
-        # this is a hack!!
+        # temporary hack for performance
         velocityEarth = self.getState().linearVelocity
         self.performAction(partial(self.actions['hover'], vx=velocityEarth[0], vy=velocityEarth[1], yaw_mode=YawMode(True, rate)))
 
@@ -232,7 +230,6 @@ class RLAgent(threading.Thread):
             while time.time() - start < period - error:
                 continue
 
-            start = time.time()
             # state is lazily updated by the environment as the agent needs it , agent always get the freshest estimate of the state
             # state updates are done by the environment in a rate that corresponds to agent decision making freq.
             self.updateState()
@@ -258,7 +255,6 @@ class RLAgent(threading.Thread):
                 # get agent into initial state
                 self.initializeState()
 
-            error = (time.time() - start)
             self.timeStep += 1
 
     def saveProgress(self, progress, fileName, append=False):
