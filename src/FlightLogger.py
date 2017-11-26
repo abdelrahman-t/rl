@@ -104,7 +104,8 @@ def main():
                       position=RLAgent.getPosition, linearAcceleration=RLAgent.getLinearAcceleration,
                       angularAcceleration=RLAgent.getAngularAcceleration)
 
-    agent.setRl(partial(flightLogger, dataset='C:/Users/talaa/Desktop/out.csv'))
+    # agent.setRl(partial(flightLogger, dataset='replay.csv'))
+    agent.setRl(flightLogger)
     agent.start()
     agent.join()
 
