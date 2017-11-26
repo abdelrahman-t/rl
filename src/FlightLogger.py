@@ -94,7 +94,7 @@ def flightLogger(agent, dataset=None, baseFrequency=10):
 
 
 def main():
-    agent = RLAgent('agent', decisionFrequency=10.0, defaultSpeed=4, defaultAltitude=6, yawRate=70)
+    agent = RLAgent('agent', decisionFrequency=50.0, defaultSpeed=4, defaultAltitude=6, yawRate=70)
 
     # callbacks will be called in the order they were specified, beware of order of execution (if any state parameter is dependant on
     # another)

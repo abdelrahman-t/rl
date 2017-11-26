@@ -81,18 +81,23 @@ def eulerToQuaternion(roll, pitch, yaw):
 
 
 def transformToEarthFrame(vector, q):
-    return Quaternion(q).inverse.rotate(vector)
+    q_ = Quaternion(q)
+    return q_.inverse.rotate(vector)
 
 
 def transformToBodyFrame(vector, q):
-    return Quaternion(q).rotate(vector)
+    q_ = Quaternion(q)
+    return q_.rotate(vector)
 
 
-def generateGaussianNoise(std, mean=0):
-    return np.random.normal(scale=std, loc=mean)
+def getGravityVector(roll, pitch):
+    x = np.cos(pitch) * np.sin(roll)
+    y = -np.sin(pitch)
+    z = -np.cos(pitch) * np.cos(roll)
+
+    return np.array([x, y, z])
 
 
-# https://stackoverflow.com/questions/2320986/easy-way-to-keeping-angles-between-179-and-180-degrees
 def wrapAroundPi(angle):
     return np.arctan2(np.sin(angle), np.cos(angle))
 
@@ -105,12 +110,40 @@ def integratePosition(p0, v, f):
     return p0 + v / f
 
 
+def integrateAngularVelocity(w, alpha, f):
+    return np.array(list(map(wrapAroundPi, w + alpha / f)))
+
+
+def integrateLinearVelocity(v, a, f):
+    return v + a / f
+
+
+def downSample(originalFrequency, sampleFrequency, df):
+    g = df.groupby(df.index // int(originalFrequency / sampleFrequency))
+
+    d = (g[[i for i in df.columns if i.startswith('d')]].sum() / originalFrequency) * sampleFrequency
+    p = g[[i for i in df.columns if i.startswith('d') is False and i not in {'t', 'f', 's', 'aIndex', 'aName'}]].last()
+    a = g['aIndex'].agg(lambda x: x.value_counts().index[0])
+
+    downSampled = reduce(lambda df1, df2: pd.merge(df1, df2, right_index=True, left_index=True), [p, d, a.to_frame()])
+    downSampled['f'] = sampleFrequency
+    return downSampled
+
+
 def getAverageAngularVelocity(p1, p0, f):
     return np.array(list(map(wrapAroundPi, p1 - p0))) * f
 
 
 def getAverageLinearVelocity(p1, p0, f):
     return np.array((p1 - p0) * f)
+
+
+def getAverageLinearAcceleration(v1, v0, f):
+    return np.array((v1 - v0) * f)
+
+
+def getAverageAngularAcceleration(v1, v0, f):
+    return np.array((v1 - v0) * f)
 
 
 def getAveragesBody(df, limit, frequency=10):
@@ -134,12 +167,12 @@ def getAveragesBody(df, limit, frequency=10):
                                                          df.loc[i - 1, ['psi', 'theta', 'phi']].values,
                                                          frequency)
 
-        linearAccelerations[i] = getAverageLinearVelocity(linearVelocities[i], linearVelocities[i - 1], frequency)
-        angularAccelerations[i] = getAverageAngularVelocity(angularVelocities[i], angularVelocities[i - 1], frequency)
+        linearAccelerations[i] = getAverageLinearAcceleration(linearVelocities[i], linearVelocities[i - 1], frequency)
+        angularAccelerations[i] = getAverageAngularAcceleration(angularVelocities[i], angularVelocities[i - 1], frequency)
 
-    for i in range(2, limit):
-        linearAccelerations[i] = transformToBodyFrame(linearAccelerations[i], df.loc[i, ['scalar', 'i', 'j', 'k']].values)
+    for i, j in zip(range(1, limit), range(2, limit)):
         linearVelocities[i] = transformToBodyFrame(linearVelocities[i], df.loc[i, ['scalar', 'i', 'j', 'k']].values)
+        linearAccelerations[j] = transformToBodyFrame(linearAccelerations[j], df.loc[i, ['scalar', 'i', 'j', 'k']].values)
 
     return linearVelocities[1:], angularVelocities[1:], linearAccelerations[2:], angularAccelerations[2:]
 
@@ -154,28 +187,20 @@ def integrateTrajectoryVelocityBody(initialPosition, initialOrientation, linearV
 
 def integrateTrajectoryAccelerationBody(initialPosition, initialOrientation, initialLinearVelocityBody, initialAngularVelocity,
                                         linearAccelerationsBody, angularAccelerations, frequency):
-    integrateAngularVelocity = integrateOrientation
-    initialLinearVelocityEarth = transformToEarthFrame(initialLinearVelocityBody, eulerToQuaternion(*initialOrientation))
     for a, alpha, f in zip(linearAccelerationsBody, angularAccelerations, frequency):
         initialAngularVelocity = integrateAngularVelocity(initialAngularVelocity, alpha, f)
-        initialOrientation = integrateOrientation(initialOrientation, initialAngularVelocity, f)
+        nextOrientation = integrateOrientation(initialOrientation, initialAngularVelocity, f)
 
-        initialLinearVelocityEarth += transformToEarthFrame(a, eulerToQuaternion(*initialOrientation)) / f
-        initialPosition = integratePosition(initialPosition, initialLinearVelocityEarth, f)
+        initialLinearVelocityBody = integrateLinearVelocity(initialLinearVelocityBody, a, f)
+        deltaQuaternion = eulerToQuaternion(*nextOrientation) * eulerToQuaternion(*initialOrientation).inverse
+        initialLinearVelocityBody = deltaQuaternion.rotate(initialLinearVelocityBody)
+
+        initialPosition = integratePosition(initialPosition,
+                                            transformToEarthFrame(initialLinearVelocityBody, eulerToQuaternion(*nextOrientation)), f)
+
+        initialOrientation = nextOrientation
 
         yield initialPosition
-
-
-def downSample(originalFrequency, sampleFrequency, df):
-    g = df.groupby(df.index // int(originalFrequency / sampleFrequency))
-
-    d = (g[[i for i in df.columns if i.startswith('d')]].sum() / originalFrequency) * sampleFrequency
-    p = g[[i for i in df.columns if i.startswith('d') is False and i not in {'t', 'f', 's', 'aIndex', 'aName'}]].last()
-    a = g['aIndex'].agg(lambda x: x.value_counts().index[0])
-
-    downSampled = reduce(lambda df1, df2: pd.merge(df1, df2, right_index=True, left_index=True), [p, d, a.to_frame()])
-    downSampled['f'] = sampleFrequency
-    return downSampled
 
 
 class State:

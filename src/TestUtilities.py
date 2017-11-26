@@ -12,12 +12,6 @@ class TestUtilities(unittest.TestCase):
     def test_quaternionConversion(self):
         pass
 
-    def test_integrateOrientation(self):
-        pass
-
-    def test_integratePosition(self):
-        pass
-
     def test_integrateTrajectoryVelocityBody(self):
         pass
 
