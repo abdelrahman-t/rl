@@ -40,8 +40,8 @@ def monteCarloSearch(agent, callback):
 
 # to do: use multiprocessing instead of threading as GIL renders the threaded approach useless!!
 # thread-safety is not enforced, code is only thread-safe on CPython
-def monteCarlo(agent, maxDepth=15, trials=10, frequency=10):
-    model = VelocityModel(model=joblib.load('linearModel.model'), frequency=frequency)
+def monteCarlo(agent, maxDepth=10, trials=10, frequency=10):
+    model = VelocityModel(model=joblib.load('neural.model'), frequency=frequency)
     while True:
         initialState, isTerminal = agent.getState(), False
         while isTerminal is False:

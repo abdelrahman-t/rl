@@ -180,17 +180,34 @@ def getAveragesBody(df, limit, frequency):
     return linearVelocities[1:], angularVelocities[1:], linearAccelerations[1:], angularAccelerations[1:]
 
 
-def getInputOutput(df, frequency, limit=500):
+def getInputOutputVelocityModel(df, frequency, limit=500):
     v, w, a, alpha = getAveragesBody(df, limit, frequency=frequency)
     X, y = np.zeros((limit, 12)), np.zeros((limit, 6))
 
-    keymap = {8: 'moveForward', 4: 'yawCCW', 6: 'yawCW', 5: 'hover'}
     inverseKeymap = {'moveForward': 0, 'yawCCW': 0, 'yawCW': 0, 'hover': 0}
 
     for i in range(limit - 2):
-        rowi, action = df.iloc[i + 1], df.loc[i + 2, 'aIndex']
-        inverseKeymap[keymap[action]] = 1
-        X[i] = np.concatenate((v[i], w[i], [rowi['psi']], [rowi['theta']], [v for k, v in inverseKeymap.items()]))
+        rowi, action = df.iloc[i + 1], df.loc[i + 2, 'aName']
+        X[i] = np.concatenate((v[i], w[i], [rowi['psi']], [rowi['theta']], [0 if k != action else 1 for k, v in inverseKeymap.items()]))
+        y[i] = np.concatenate((v[i + 1], w[i + 1]))
+
+    xColumns = ['dXB', 'dYB', 'dZB', 'dPsi', 'dTheta', 'dPhi', 'Psi', 'Theta'] + [i for i in inverseKeymap.keys()]
+    yColumns = ['dXB', 'dYB', 'dZB', 'dPsi', 'dTheta', 'dPhi']
+    X, y = pd.DataFrame(X, columns=xColumns), \
+           pd.DataFrame(y, columns=yColumns)
+
+    return X, y
+
+
+def getInputOutputAccelerationModel(df, frequency, limit=500):
+    v, w, a, alpha = getAveragesBody(df, limit, frequency=frequency)
+    X, y = np.zeros((limit, 12)), np.zeros((limit, 6))
+
+    inverseKeymap = {'moveForward': 0, 'yawCCW': 0, 'yawCW': 0, 'hover': 0}
+
+    for i in range(limit - 2):
+        rowi, action = df.iloc[i + 1], df.loc[i + 2, 'aName']
+        X[i] = np.concatenate((v[i], w[i], [rowi['psi']], [rowi['theta']], [0 if k != action else 1 for k, v in inverseKeymap.items()]))
         y[i] = np.concatenate((a[i], alpha[i]))
 
     xColumns = ['dXB', 'dYB', 'dZB', 'dPsi', 'dTheta', 'dPhi', 'Psi', 'Theta'] + [i for i in inverseKeymap.keys()]
@@ -207,7 +224,7 @@ def integrateTrajectoryVelocityBody(initialPosition, initialOrientation,
         initialOrientation = integrateOrientation(initialOrientation, w, f)
         initialPosition = integratePosition(initialPosition,
                                             transformToEarthFrame(v, eulerToQuaternion(*initialOrientation)), f)
-        yield initialPosition
+        yield initialPosition, initialOrientation
 
 
 def integrateTrajectoryAccelerationBody(initialPosition, initialOrientation,
