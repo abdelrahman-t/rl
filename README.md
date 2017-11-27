@@ -1,2 +1,2 @@
 # rl
-reinforcement learning applied on unmanned aerial vehicles
+Reinforcement learning applied on vehicles based on Microsoft AirSim 

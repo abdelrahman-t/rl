@@ -1,3 +1,6 @@
+import sys
+sys.path.append('./AirSim')
+
 from collections import defaultdict, OrderedDict, namedtuple, deque
 from itertools import starmap, count
 from functools import partial, reduce

@@ -19,7 +19,7 @@ def flightLogger(agent, dataset=None, baseFrequency=10):
         pass
 
     writer, timeStep = None, 1
-    with open(getDateTime().strip() + '.csv', 'w') as csvfile:
+    with open('datasets/' + getDateTime().strip() + '.csv', 'w') as csvfile:
         while True:
             initialState, a = agent.getState(), agent.keyPressed.value
 
@@ -104,7 +104,7 @@ def main():
                       position=RLAgent.getPosition, linearAcceleration=RLAgent.getLinearAcceleration,
                       angularAcceleration=RLAgent.getAngularAcceleration)
 
-    # agent.setRl(partial(flightLogger, dataset='replay.csv'))
+    # agent.setRl(partial(flightLogger, dataset='datasets/' + 'replay.csv'))
     agent.setRl(flightLogger)
     agent.start()
     agent.join()

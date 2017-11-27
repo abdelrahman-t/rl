@@ -207,7 +207,7 @@ class RLAgent(threading.Thread):
         self.initialize()
         callback = self.rl()
 
-        logFileStream = open(self.logFileName, 'wb') if self.logFlight else None
+        logFileStream = open('datasets/' + self.logFileName, 'wb') if self.logFlight else None
         logToFile = lambda data: pickle.dump(data, logFileStream, protocol=pickle.HIGHEST_PROTOCOL)
         flightLogger = logToFile if logFileStream else lambda _: False
 
