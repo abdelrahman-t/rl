@@ -122,10 +122,13 @@ def downSample(originalFrequency, sampleFrequency, df):
     g = df.groupby(df.index // int(originalFrequency / sampleFrequency))
 
     d = (g[[i for i in df.columns if i.startswith('d')]].sum() / originalFrequency) * sampleFrequency
-    p = g[[i for i in df.columns if i.startswith('d') is False and i not in {'t', 'f', 's', 'aIndex', 'aName'}]].last()
+    p = g[[i for i in df.columns if i.startswith('d') is False
+           and i not in {'t', 'f', 's', 'aIndex', 'aName'}]].last()
+
     a = g['aIndex'].agg(lambda x: x.value_counts().index[0])
 
-    downSampled = reduce(lambda df1, df2: pd.merge(df1, df2, right_index=True, left_index=True), [p, d, a.to_frame()])
+    downSampled = reduce(lambda df1, df2: pd.merge(df1, df2, right_index=True,
+                                                   left_index=True), [p, d, a.to_frame()])
     downSampled['f'] = sampleFrequency
     return downSampled
 
@@ -146,19 +149,12 @@ def getAverageAngularAcceleration(v1, v0, f):
     return np.array((v1 - v0) * f)
 
 
-def getAveragesBody(df, limit, frequency=10):
+def getAveragesBody(df, limit, frequency):
     shape = (limit, 3)
     linearVelocities, linearAccelerations = np.zeros(shape), np.zeros(shape)
     angularVelocities, angularAccelerations = np.zeros(shape), np.zeros(shape)
 
-    linearVelocities[1] = getAverageLinearVelocity(df.loc[1, ['x', 'y', 'z']].values,
-                                                   df.loc[0, ['x', 'y', 'z']].values,
-                                                   frequency)
-
-    angularVelocities[1] = getAverageAngularVelocity(df.loc[1, ['psi', 'theta', 'phi']].values,
-                                                     df.loc[0, ['psi', 'theta', 'phi']].values,
-                                                     frequency)
-    for i in range(2, limit):
+    for i in range(1, limit):
         linearVelocities[i] = getAverageLinearVelocity(df.loc[i, ['x', 'y', 'z']].values,
                                                        df.loc[i - 1, ['x', 'y', 'z']].values,
                                                        frequency)
@@ -167,17 +163,46 @@ def getAveragesBody(df, limit, frequency=10):
                                                          df.loc[i - 1, ['psi', 'theta', 'phi']].values,
                                                          frequency)
 
-        linearAccelerations[i] = getAverageLinearAcceleration(linearVelocities[i], linearVelocities[i - 1], frequency)
-        angularAccelerations[i] = getAverageAngularAcceleration(angularVelocities[i], angularVelocities[i - 1], frequency)
+    for i in range(1, limit - 1):
+        linearAccelerations[i] = \
+            getAverageLinearAcceleration(linearVelocities[i + 1], linearVelocities[i], frequency)
 
-    for i, j in zip(range(1, limit), range(2, limit)):
-        linearVelocities[i] = transformToBodyFrame(linearVelocities[i], df.loc[i, ['scalar', 'i', 'j', 'k']].values)
-        linearAccelerations[j] = transformToBodyFrame(linearAccelerations[j], df.loc[i, ['scalar', 'i', 'j', 'k']].values)
+        angularAccelerations[i] = \
+            getAverageAngularAcceleration(angularVelocities[i + 1], angularVelocities[i], frequency)
 
-    return linearVelocities[1:], angularVelocities[1:], linearAccelerations[2:], angularAccelerations[2:]
+    for i in range(1, limit):
+        linearVelocities[i] = \
+            transformToBodyFrame(linearVelocities[i], df.loc[i, ['scalar', 'i', 'j', 'k']].values)
+
+        linearAccelerations[i] = \
+            transformToBodyFrame(linearAccelerations[i], df.loc[i, ['scalar', 'i', 'j', 'k']].values)
+
+    return linearVelocities[1:], angularVelocities[1:], linearAccelerations[1:], angularAccelerations[1:]
 
 
-def integrateTrajectoryVelocityBody(initialPosition, initialOrientation, linearVelocitiesBody, angularVelocities, frequency):
+def getInputOutput(df, frequency, limit=500):
+    v, w, a, alpha = getAveragesBody(df, limit, frequency=frequency)
+    X, y = np.zeros((limit, 12)), np.zeros((limit, 6))
+
+    keymap = {8: 'moveForward', 4: 'yawCCW', 6: 'yawCW', 5: 'hover'}
+    inverseKeymap = {'moveForward': 0, 'yawCCW': 0, 'yawCW': 0, 'hover': 0}
+
+    for i in range(limit - 2):
+        rowi, action = df.iloc[i + 1], df.loc[i + 2, 'aIndex']
+        inverseKeymap[keymap[action]] = 1
+        X[i] = np.concatenate((v[i], w[i], [rowi['psi']], [rowi['theta']], [v for k, v in inverseKeymap.items()]))
+        y[i] = np.concatenate((a[i], alpha[i]))
+
+    xColumns = ['dXB', 'dYB', 'dZB', 'dPsi', 'dTheta', 'dPhi', 'Psi', 'Theta'] + [i for i in inverseKeymap.keys()]
+    yColumns = ['d2XB', 'd2YB', 'd2ZB', 'd2Psi', 'd2Theta', 'd2Phi']
+    X, y = pd.DataFrame(X, columns=xColumns), \
+           pd.DataFrame(y, columns=yColumns)
+
+    return X, y
+
+
+def integrateTrajectoryVelocityBody(initialPosition, initialOrientation,
+                                    linearVelocitiesBody, angularVelocities, frequency):
     for v, w, f in zip(linearVelocitiesBody, angularVelocities, frequency):
         initialOrientation = integrateOrientation(initialOrientation, w, f)
         initialPosition = integratePosition(initialPosition,
@@ -185,22 +210,24 @@ def integrateTrajectoryVelocityBody(initialPosition, initialOrientation, linearV
         yield initialPosition
 
 
-def integrateTrajectoryAccelerationBody(initialPosition, initialOrientation, initialLinearVelocityBody, initialAngularVelocity,
+def integrateTrajectoryAccelerationBody(initialPosition, initialOrientation,
+                                        initialLinearVelocityBody, initialAngularVelocity,
                                         linearAccelerationsBody, angularAccelerations, frequency):
     for a, alpha, f in zip(linearAccelerationsBody, angularAccelerations, frequency):
         initialAngularVelocity = integrateAngularVelocity(initialAngularVelocity, alpha, f)
         nextOrientation = integrateOrientation(initialOrientation, initialAngularVelocity, f)
 
         initialLinearVelocityBody = integrateLinearVelocity(initialLinearVelocityBody, a, f)
-        deltaQuaternion = eulerToQuaternion(*nextOrientation) * eulerToQuaternion(*initialOrientation).inverse
-        initialLinearVelocityBody = deltaQuaternion.rotate(initialLinearVelocityBody)
+
+        deltaQuaternion = eulerToQuaternion(*nextOrientation) * eulerToQuaternion(*initialOrientation).inverse.unit
+        initialLinearVelocityBody = deltaQuaternion.unit.rotate(initialLinearVelocityBody)
 
         initialPosition = integratePosition(initialPosition,
-                                            transformToEarthFrame(initialLinearVelocityBody, eulerToQuaternion(*nextOrientation)), f)
-
+                                            transformToEarthFrame(initialLinearVelocityBody,
+                                                                  eulerToQuaternion(*nextOrientation)), f)
         initialOrientation = nextOrientation
 
-        yield initialPosition
+        yield initialPosition, initialOrientation
 
 
 class State:
