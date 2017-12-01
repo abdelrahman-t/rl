@@ -1,6 +1,3 @@
 *.xml
 *.iml
 *.pyc
-data
-weights
-*.csv
