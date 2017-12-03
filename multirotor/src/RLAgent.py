@@ -7,9 +7,9 @@ from abc import ABCMeta, abstractmethod
 class RLAgent(threading.Thread):
     __metaclass__ = ABCMeta
 
-    def __init__(self, name, model=None, maxDepth=20, initialState=None, serverIpAddress='127.0.0.1', defaultSpeed=3, defaultAltitude=1.5,
-                 yawRate=70, decisionFrequency=10, learningRate=0.01, discount=1, crashRecoveryPeriod=16, logFlight=False,
-                 logFileName=getDateTime().strip()):
+    def __init__(self, name, model=None, maxDepth=20, initialState=None, serverIpAddress='127.0.0.1', defaultSpeed=3,
+                 defaultAltitude=1.5, yawRate=70, decisionFrequency=10, learningRate=0.01, discount=1,
+                 crashRecoveryPeriod=16, logFlight=False, logFileName=getDateTime().strip()):
 
         threading.Thread.__init__(self, name=name)
 
@@ -46,7 +46,8 @@ class RLAgent(threading.Thread):
             self.actions = {'moveForward': None, 'yawCW': None, 'yawCCW': None, 'hover': None}
         else:
             self.initializeConnection()
-            moveByVelocityZ = partial(self.client.moveByVelocityZ, vx=0, vy=0, z=-self.defaultAltitude, yaw_mode=YawMode(True, 0),
+            moveByVelocityZ = partial(self.client.moveByVelocityZ, vx=0, vy=0, z=-self.defaultAltitude,
+                                      yaw_mode=YawMode(True, 0),
                                       duration=10.0, drivetrain=DrivetrainType.MaxDegreeOfFreedom)
 
             self.actions = {'moveForward': self.moveForward, 'yawCW': partial(self.yaw, self.yawRate),
@@ -141,17 +142,17 @@ class RLAgent(threading.Thread):
         token.clear()
 
     def moveForward(self):
-        # The attitude in the aeronautical frame (right-handed, Z-down, X-front, Y-right).
-        velocityEarth = np.array([self.defaultSpeed, 0, 0])
+        velocityBody = np.array([self.defaultSpeed, 0, 0])
 
         # temporary hack for performance
-        velocityBody = transformToBodyFrame(velocityEarth, self.getState().orientation)
-        self.performAction(partial(self.actions['hover'], vx=velocityBody[0], vy=velocityBody[1]))
+        velocityEarth = transformToEarthFrame(velocityBody, self.getState().orientation)
+        self.performAction(partial(self.actions['hover'], vx=velocityEarth[0], vy=velocityEarth[1]))
 
     def yaw(self, rate):
         # temporary hack for performance
         velocityEarth = self.getState().linearVelocity
-        self.performAction(partial(self.actions['hover'], vx=velocityEarth[0], vy=velocityEarth[1], yaw_mode=YawMode(True, rate)))
+        self.performAction(
+            partial(self.actions['hover'], vx=velocityEarth[0], vy=velocityEarth[1], yaw_mode=YawMode(True, rate)))
 
     def isTerminal(self):
         return len([True for i in self.isTerminalConditions if i(agent=self)])
@@ -172,8 +173,8 @@ class RLAgent(threading.Thread):
             self.state = self.state.updateState(self)
 
     def getActions(self, all=False):
-        # all parameter=true will return all actions the agents have regardless of context, as some actions might not be accessible to the
-        # agent depending on state (feature to be completed)
+        # all parameter=true will return all actions the agents have regardless of context,
+        # as some actions might not be accessible to the agent depending on state (feature to be completed)
         return list(self.actions.keys())
 
     def performAction(self, action):
@@ -199,8 +200,7 @@ class RLAgent(threading.Thread):
 
     def reset(self):
         self.logger.info("Resetting")
-        # resetting environment , the old way
-        # make sure simulator window is active
+        # resetting environment , the old way. make sure simulator window is active!
         self.shell.SendKeys('\b')
 
     def run(self):
@@ -230,8 +230,6 @@ class RLAgent(threading.Thread):
             while time.time() - start < period - error:
                 continue
 
-            # state is lazily updated by the environment as the agent needs it , agent always get the freshest estimate of the state
-            # state updates are done by the environment in a rate that corresponds to agent decision making freq.
             self.updateState()
 
             s, r, isTerminal = self.getState(), self.reward(), self.isTerminal()

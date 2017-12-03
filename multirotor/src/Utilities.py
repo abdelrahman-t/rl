@@ -82,12 +82,33 @@ def eulerToQuaternion(roll, pitch, yaw):
 
 def transformToEarthFrame(vector, q):
     q_ = Quaternion(q)
-    return q_.inverse.rotate(vector)
+    return q_.rotate(vector)
+
+
+def transformAngularVelocityToEarth(rates, q):
+    roll, pitch, yaw = toEulerianAngle(Quaternion(q))
+    roll_rate_body, pitch_rate_body, yaw_rate_body = rates
+    roll_rate_earth = roll_rate_body + pitch_rate_body * np.sin(roll) * np.tan(pitch) + yaw_rate_body * np.cos(
+        roll) * np.tan(pitch)
+    pitch_rate_earth = pitch_rate_body * np.cos(roll) - yaw_rate_body * np.sin(roll)
+    yaw_rate_earth = pitch_rate_body * np.sin(roll) / np.cos(pitch) + yaw_rate_body * np.cos(roll) / np.cos(pitch)
+
+    return np.array([roll_rate_earth, pitch_rate_earth, yaw_rate_earth])
+
+
+def transformAngularVelocityToBody(rates, q):
+    roll, pitch, yaw = toEulerianAngle(Quaternion(q))
+    roll_rate_earth, pitch_rate_earth, yaw_rate_earth = rates
+    roll_rate_body = roll_rate_earth - yaw_rate_earth * np.sin(pitch)
+    pitch_rate_body = pitch_rate_earth * np.cos(roll) + yaw_rate_earth * np.sin(roll) * np.cos(pitch)
+    yaw_rate_body = pitch_rate_earth * -np.sin(roll) + yaw_rate_earth * np.cos(roll) * np.cos(pitch)
+
+    return np.array([roll_rate_body, pitch_rate_body, yaw_rate_body])
 
 
 def transformToBodyFrame(vector, q):
     q_ = Quaternion(q)
-    return q_.rotate(vector)
+    return q_.inverse.rotate(vector)
 
 
 def getGravityVector(roll, pitch):
@@ -159,8 +180,8 @@ def getAveragesBody(df, limit, frequency):
                                                        df.loc[i - 1, ['x', 'y', 'z']].values,
                                                        frequency)
 
-        angularVelocities[i] = getAverageAngularVelocity(df.loc[i, ['psi', 'theta', 'phi']].values,
-                                                         df.loc[i - 1, ['psi', 'theta', 'phi']].values,
+        angularVelocities[i] = getAverageAngularVelocity(df.loc[i, ['roll', 'pitch', 'yaw']].values,
+                                                         df.loc[i - 1, ['roll', 'pitch', 'yaw']].values,
                                                          frequency)
 
     for i in range(1, limit - 1):
@@ -171,11 +192,19 @@ def getAveragesBody(df, limit, frequency):
             getAverageAngularAcceleration(angularVelocities[i + 1], angularVelocities[i], frequency)
 
     for i in range(1, limit):
+        q = df.loc[i, ['scalar', 'i', 'j', 'k']].values
+
         linearVelocities[i] = \
-            transformToBodyFrame(linearVelocities[i], df.loc[i, ['scalar', 'i', 'j', 'k']].values)
+            transformToBodyFrame(linearVelocities[i], q)
 
         linearAccelerations[i] = \
-            transformToBodyFrame(linearAccelerations[i], df.loc[i, ['scalar', 'i', 'j', 'k']].values)
+            transformToBodyFrame(linearAccelerations[i], q)
+
+        angularVelocities[i] = \
+            transformAngularVelocityToBody(angularVelocities[i], q)
+
+        angularAccelerations[i] = \
+            transformAngularVelocityToBody(angularAccelerations[i], q)
 
     return linearVelocities[1:], angularVelocities[1:], linearAccelerations[1:], angularAccelerations[1:]
 
@@ -184,15 +213,16 @@ def getInputOutputVelocityModel(df, frequency, limit=500):
     v, w, a, alpha = getAveragesBody(df, limit, frequency=frequency)
     X, y = np.zeros((limit, 12)), np.zeros((limit, 6))
 
-    inverseKeymap = {'moveForward': 0, 'yawCCW': 0, 'yawCW': 0, 'hover': 0}
+    inverseKeymap = ['moveForward', 'yawCCW', 'yawCW', 'hover']
 
     for i in range(limit - 2):
         rowi, action = df.iloc[i + 1], df.loc[i + 2, 'aName']
-        X[i] = np.concatenate((v[i], w[i], [rowi['psi']], [rowi['theta']], [0 if k != action else 1 for k, v in inverseKeymap.items()]))
+        X[i] = np.concatenate(
+            (v[i], w[i], [rowi['roll']], [rowi['pitch']], [0 if a != action else 1 for a in inverseKeymap]))
         y[i] = np.concatenate((v[i + 1], w[i + 1]))
 
-    xColumns = ['dXB', 'dYB', 'dZB', 'dPsi', 'dTheta', 'dPhi', 'Psi', 'Theta'] + [i for i in inverseKeymap.keys()]
-    yColumns = ['dXB', 'dYB', 'dZB', 'dPsi', 'dTheta', 'dPhi']
+    xColumns = ['dXB', 'dYB', 'dZB', 'dRoll', 'dPitch', 'dYaw', 'roll', 'pitch'] + [i for i in inverseKeymap]
+    yColumns = ['dXB', 'dYB', 'dZB', 'dRoll', 'dPitch', 'dYaw']
     X, y = pd.DataFrame(X, columns=xColumns), \
            pd.DataFrame(y, columns=yColumns)
 
@@ -203,15 +233,16 @@ def getInputOutputAccelerationModel(df, frequency, limit=500):
     v, w, a, alpha = getAveragesBody(df, limit, frequency=frequency)
     X, y = np.zeros((limit, 12)), np.zeros((limit, 6))
 
-    inverseKeymap = {'moveForward': 0, 'yawCCW': 0, 'yawCW': 0, 'hover': 0}
+    inverseKeymap = ['moveForward', 'yawCCW', 'yawCW', 'hover']
 
     for i in range(limit - 2):
         rowi, action = df.iloc[i + 1], df.loc[i + 2, 'aName']
-        X[i] = np.concatenate((v[i], w[i], [rowi['psi']], [rowi['theta']], [0 if k != action else 1 for k, v in inverseKeymap.items()]))
+        X[i] = np.concatenate(
+            (v[i], w[i], [rowi['roll']], [rowi['pitch']], [0 if a != action else 1 for a in inverseKeymap]))
         y[i] = np.concatenate((a[i], alpha[i]))
 
-    xColumns = ['dXB', 'dYB', 'dZB', 'dPsi', 'dTheta', 'dPhi', 'Psi', 'Theta'] + [i for i in inverseKeymap.keys()]
-    yColumns = ['d2XB', 'd2YB', 'd2ZB', 'd2Psi', 'd2Theta', 'd2Phi']
+    xColumns = ['dXB', 'dYB', 'dZB', 'dRoll', 'dPitch', 'dYaw', 'roll', 'pitch'] + [i for i in inverseKeymap]
+    yColumns = ['d2XB', 'd2YB', 'd2ZB', 'd2Roll', 'd2Pitch', 'd2Yaw']
     X, y = pd.DataFrame(X, columns=xColumns), \
            pd.DataFrame(y, columns=yColumns)
 
@@ -220,6 +251,7 @@ def getInputOutputAccelerationModel(df, frequency, limit=500):
 
 def integrateTrajectoryVelocityBody(initialPosition, initialOrientation,
                                     linearVelocitiesBody, angularVelocities, frequency):
+
     for v, w, f in zip(linearVelocitiesBody, angularVelocities, frequency):
         initialOrientation = integrateOrientation(initialOrientation, w, f)
         initialPosition = integratePosition(initialPosition,
@@ -227,21 +259,26 @@ def integrateTrajectoryVelocityBody(initialPosition, initialOrientation,
         yield initialPosition, initialOrientation
 
 
-def integrateTrajectoryAccelerationBody(initialPosition, initialOrientation,
-                                        initialLinearVelocityBody, initialAngularVelocity,
-                                        linearAccelerationsBody, angularAccelerations, frequency):
-    for a, alpha, f in zip(linearAccelerationsBody, angularAccelerations, frequency):
-        initialAngularVelocity = integrateAngularVelocity(initialAngularVelocity, alpha, f)
-        nextOrientation = integrateOrientation(initialOrientation, initialAngularVelocity, f)
+def integrateTrajectoryAccelerationBody(initialPosition, initialOrientation, initialLinearVelocityBody,
+                                        initialAngularVelocityBody, linearAccelerationsBody, angularAccelerationsBody,
+                                        frequency):
 
+    for a, alpha, f in zip(linearAccelerationsBody, angularAccelerationsBody, frequency):
+        initialAngularVelocityBody = integrateAngularVelocity(initialAngularVelocityBody, alpha, f)
         initialLinearVelocityBody = integrateLinearVelocity(initialLinearVelocityBody, a, f)
 
-        deltaQuaternion = eulerToQuaternion(*nextOrientation) * eulerToQuaternion(*initialOrientation).inverse.unit
-        initialLinearVelocityBody = deltaQuaternion.unit.rotate(initialLinearVelocityBody)
+        qInitial = eulerToQuaternion(*initialOrientation)
+        nextOrientation = integrateOrientation(initialOrientation,
+                                               transformAngularVelocityToEarth(initialAngularVelocityBody, qInitial), f)
 
+        qNext = eulerToQuaternion(*nextOrientation)
         initialPosition = integratePosition(initialPosition,
-                                            transformToEarthFrame(initialLinearVelocityBody,
-                                                                  eulerToQuaternion(*nextOrientation)), f)
+                                            transformToEarthFrame(initialLinearVelocityBody, qInitial), f)
+
+        initialAngularVelocityBody = \
+            transformAngularVelocityToBody(transformAngularVelocityToEarth(initialAngularVelocityBody, qInitial), qNext)
+
+        initialLinearVelocityBody = (qNext.inverse * qInitial).rotate(initialLinearVelocityBody)
         initialOrientation = nextOrientation
 
         yield initialPosition, initialOrientation

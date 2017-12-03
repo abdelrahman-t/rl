@@ -54,7 +54,8 @@ def monteCarlo(agent, maxDepth=10, trials=10, frequency=10):
                 virtualAgent.setReward(reward)
                 virtualAgent.goal = agent.getGoal()
                 virtualAgent.goalMargins = agent.getGoalMargins()
-                virtualAgent.setRl(partial(monteCarloSearch, callback=lambda q: (qs[a].append(q), queue_.get(), queue_.task_done())))
+                virtualAgent.setRl(
+                    partial(monteCarloSearch, callback=lambda q: (qs[a].append(q), queue_.get(), queue_.task_done())))
 
                 queue_.put(a)
                 virtualAgent.start()
@@ -73,11 +74,13 @@ def monteCarlo(agent, maxDepth=10, trials=10, frequency=10):
 def main():
     agent = RLAgent('agent', decisionFrequency=10.0, defaultSpeed=4, defaultAltitude=6, yawRate=70)
 
-    # callbacks will be called in the order they were specified, beware of order of execution (if any state parameter is dependant on
-    # another)
-    # state is lazily updated by the environment as the agent needs it , agent always get the freshest estimate of the state
-    # state updates are done by the environment in a rate that corresponds to agent decision making freq.
-    agent.defineState(orientation=RLAgent.getOrientation, angularVelocity=RLAgent.getAngularVelocity, linearVelocity=RLAgent.getVelocity,
+    # callbacks will be called in the order they were specified, beware of order of execution (if any state parameter is
+    #  dependant on another)
+    # state is lazily updated by the environment as the agent needs it , agent always get the freshest estimate of the
+    # state, state updates are done by the environment in a rate that corresponds to agent decision making freq.
+
+    agent.defineState(orientation=RLAgent.getOrientation, angularVelocity=RLAgent.getAngularVelocity,
+                      linearVelocity=RLAgent.getVelocity,
                       position=RLAgent.getPosition, goal=horizontalDistanceGoal)
 
     agent.setRl(monteCarlo)
