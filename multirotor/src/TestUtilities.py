@@ -5,31 +5,31 @@ from Common import *
 class TestUtilities(unittest.TestCase):
     df = pd.read_csv('unit_test.csv')
 
-    def test_transform_to_body(self):
+    def test_transformToBodyFrame(self):
         pass
 
-    def test_transform_to_earth(self):
+    def test_transformToEarthFrame(self):
         pass
 
-    def test_transform_angular_rates_to_body(self):
+    def test_transformAngularRateToBody(self):
         pass
 
-    def test_transform_angular_rates_to_earth(self):
+    def test_transformAngularRateToEarth(self):
         pass
 
-    def test_wrap_around_pi(self):
+    def test_wrapAroundPi(self):
         pass
 
-    def test_get_average_velocities(self):
+    def test_getAveragesBody(self):
         pass
 
-    def test_down_sample(self):
+    def test_downSample(self):
         pass
 
     def test_toEulerianAngle(self):
         pass
 
-    def test_euler_to_quaternion(self):
+    def test_eulerToQuaternion(self):
         pass
 
     def test_integrateTrajectoryAccelerationBody(self):

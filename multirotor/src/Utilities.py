@@ -85,7 +85,7 @@ def transformToEarthFrame(vector, q):
     return q_.rotate(vector)
 
 
-def transformAngularVelocityToEarth(rates, q):
+def transformAngularRateToEarth(rates, q):
     roll, pitch, yaw = toEulerianAngle(Quaternion(q))
     roll_rate_body, pitch_rate_body, yaw_rate_body = rates
     roll_rate_earth = roll_rate_body + pitch_rate_body * np.sin(roll) * np.tan(pitch) + yaw_rate_body * np.cos(
@@ -96,7 +96,7 @@ def transformAngularVelocityToEarth(rates, q):
     return np.array([roll_rate_earth, pitch_rate_earth, yaw_rate_earth])
 
 
-def transformAngularVelocityToBody(rates, q):
+def transformAngularRateToBody(rates, q):
     roll, pitch, yaw = toEulerianAngle(Quaternion(q))
     roll_rate_earth, pitch_rate_earth, yaw_rate_earth = rates
     roll_rate_body = roll_rate_earth - yaw_rate_earth * np.sin(pitch)
@@ -201,10 +201,10 @@ def getAveragesBody(df, limit, frequency):
             transformToBodyFrame(linearAccelerations[i], q)
 
         angularVelocities[i] = \
-            transformAngularVelocityToBody(angularVelocities[i], q)
+            transformAngularRateToBody(angularVelocities[i], q)
 
         angularAccelerations[i] = \
-            transformAngularVelocityToBody(angularAccelerations[i], q)
+            transformAngularRateToBody(angularAccelerations[i], q)
 
     return linearVelocities[1:], angularVelocities[1:], linearAccelerations[1:], angularAccelerations[1:]
 
@@ -238,14 +238,14 @@ def integrateTrajectoryAccelerationBody(initialPosition, initialOrientation, ini
 
         qInitial = eulerToQuaternion(*initialOrientation)
         nextOrientation = integrateOrientation(initialOrientation,
-                                               transformAngularVelocityToEarth(initialAngularVelocityBody, qInitial), f)
+                                               transformAngularRateToEarth(initialAngularVelocityBody, qInitial), f)
 
         qNext = eulerToQuaternion(*nextOrientation)
         initialPosition = integratePosition(initialPosition,
                                             transformToEarthFrame(initialLinearVelocityBody, qInitial), f)
 
         initialAngularVelocityBody = \
-            transformAngularVelocityToBody(transformAngularVelocityToEarth(initialAngularVelocityBody, qInitial), qNext)
+            transformAngularRateToBody(transformAngularRateToEarth(initialAngularVelocityBody, qInitial), qNext)
 
         initialLinearVelocityBody = (qNext.inverse * qInitial).rotate(initialLinearVelocityBody)
         initialOrientation = nextOrientation
