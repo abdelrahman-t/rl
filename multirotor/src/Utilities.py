@@ -209,26 +209,6 @@ def getAveragesBody(df, limit, frequency):
     return linearVelocities[1:], angularVelocities[1:], linearAccelerations[1:], angularAccelerations[1:]
 
 
-def getInputOutputVelocityModel(df, frequency, limit=500):
-    v, w, a, alpha = getAveragesBody(df, limit, frequency=frequency)
-    X, y = np.zeros((limit, 12)), np.zeros((limit, 6))
-
-    inverseKeymap = ['moveForward', 'yawCCW', 'yawCW', 'hover']
-
-    for i in range(limit - 2):
-        rowi, action = df.iloc[i + 1], df.loc[i + 2, 'aName']
-        X[i] = np.concatenate(
-            (v[i], w[i], [rowi['roll']], [rowi['pitch']], [0 if a != action else 1 for a in inverseKeymap]))
-        y[i] = np.concatenate((v[i + 1], w[i + 1]))
-
-    xColumns = ['dXB', 'dYB', 'dZB', 'dRoll', 'dPitch', 'dYaw', 'roll', 'pitch'] + [i for i in inverseKeymap]
-    yColumns = ['dXB', 'dYB', 'dZB', 'dRoll', 'dPitch', 'dYaw']
-    X, y = pd.DataFrame(X, columns=xColumns), \
-           pd.DataFrame(y, columns=yColumns)
-
-    return X, y
-
-
 def getInputOutputAccelerationModel(df, frequency, limit=500):
     v, w, a, alpha = getAveragesBody(df, limit, frequency=frequency)
     X, y = np.zeros((limit, 12)), np.zeros((limit, 6))
@@ -249,20 +229,9 @@ def getInputOutputAccelerationModel(df, frequency, limit=500):
     return X, y
 
 
-def integrateTrajectoryVelocityBody(initialPosition, initialOrientation,
-                                    linearVelocitiesBody, angularVelocities, frequency):
-
-    for v, w, f in zip(linearVelocitiesBody, angularVelocities, frequency):
-        initialOrientation = integrateOrientation(initialOrientation, w, f)
-        initialPosition = integratePosition(initialPosition,
-                                            transformToEarthFrame(v, eulerToQuaternion(*initialOrientation)), f)
-        yield initialPosition, initialOrientation
-
-
 def integrateTrajectoryAccelerationBody(initialPosition, initialOrientation, initialLinearVelocityBody,
                                         initialAngularVelocityBody, linearAccelerationsBody, angularAccelerationsBody,
                                         frequency):
-
     for a, alpha, f in zip(linearAccelerationsBody, angularAccelerationsBody, frequency):
         initialAngularVelocityBody = integrateAngularVelocity(initialAngularVelocityBody, alpha, f)
         initialLinearVelocityBody = integrateLinearVelocity(initialLinearVelocityBody, a, f)
@@ -284,7 +253,7 @@ def integrateTrajectoryAccelerationBody(initialPosition, initialOrientation, ini
         yield initialPosition, initialOrientation
 
 
-class State:
+class StateT:
     # if update is set to True, the environment will be able to update state whenever is needed.
     def __init__(self, update, **kwargs):
         self.prevState = None
@@ -307,9 +276,9 @@ class State:
                 return False
         return True
 
-    # States are immutable by design, each update creates a new State object
+    # States are immutable by design, each update creates a new StateT object
     def updateState(self, agent):
-        temp = State(update=True, callbacks=self.callbacks)
+        temp = StateT(update=True, callbacks=self.callbacks)
         # keep track of previous state
         temp.prevState = self
 

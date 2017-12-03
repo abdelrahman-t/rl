@@ -4,6 +4,7 @@ from Utilities import *
 from abc import ABCMeta, abstractmethod
 
 
+# TODO: refactor
 class RLAgent(threading.Thread):
     __metaclass__ = ABCMeta
 
@@ -81,13 +82,13 @@ class RLAgent(threading.Thread):
         self.logger.info("Ready")
 
     def defineState(self, **kwargs):
-        self.state = State(update=True, **kwargs)
+        self.state = StateT(update=True, **kwargs)
 
     def setGoal(self, **kwargs):
-        self.goal = State(update=False, **kwargs)
+        self.goal = StateT(update=False, **kwargs)
 
     def setGoalMargins(self, **kwargs):
-        self.goalMargins = State(update=False, **kwargs)
+        self.goalMargins = StateT(update=False, **kwargs)
 
     def getGoalMargins(self):
         return self.goalMargins
@@ -143,7 +144,6 @@ class RLAgent(threading.Thread):
 
     def moveForward(self):
         velocityBody = np.array([self.defaultSpeed, 0, 0])
-
         # temporary hack for performance
         velocityEarth = transformToEarthFrame(velocityBody, self.getState().orientation)
         self.performAction(partial(self.actions['hover'], vx=velocityEarth[0], vy=velocityEarth[1]))
