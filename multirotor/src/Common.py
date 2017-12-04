@@ -15,6 +15,7 @@ import win32com.client
 from AirSim import *
 import math
 import pythoncom
+import pickle
 import threading
 import win32gui
 import warnings

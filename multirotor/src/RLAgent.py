@@ -1,7 +1,8 @@
-import pickle
 from Common import *
 from Utilities import *
-from abc import ABCMeta, abstractmethod
+from VectorMath import *
+from AgentHelpers import *
+from abc import ABCMeta
 
 
 # TODO: refactor
@@ -17,24 +18,24 @@ class RLAgent(threading.Thread):
         self.logger = createConsoleLogger(name)
         self.logFlight, self.logFileName = logFlight, logFileName
 
-        self.shell, self.client, self.actions, self.serverIpAddress = None, None, None, serverIpAddress
+        self.serverIpAddress = serverIpAddress
+        self.shell = self.client = self.actions = None
+
         self.yawRate, self.defaultSpeed, self.defaultAltitude = yawRate, defaultSpeed, defaultAltitude
 
         self.decisionFrequency, self.learningRate, self.discount = decisionFrequency, learningRate, discount
-        self.state = self.goal = self.goalMargins = None
-        self.currentAction = None
-        self.isTerminalConditions = [self.isGoal, self.getCollisionInfo]
-        self.hitObstacleFlag = False
-        self.crashRecoveryPeriod = crashRecoveryPeriod
+        self.state = self.currentAction = self.goal = self.goalMargins = None
+
+        self.hitObstacleFlag, self.crashRecoveryPeriod = False, crashRecoveryPeriod
+        self.isTerminalConditions = [isGoal, getCollisionInfo]
 
         self.keyMap, self.keyPressed = None, KeyT()
-        self.keyboardListener = keyboard.Listener(on_press=partial(self.onPress, token=self.keyPressed),
-                                                  on_release=partial(self.onRelease, token=self.keyPressed))
-
+        self.keyboardListener = keyboard.Listener(on_press=partial(onPress, token=self.keyPressed),
+                                                  on_release=partial(onRelease, token=self.keyPressed))
         self.keyboardListener.start()
-        self.model = model
-        self.maxDepth, self.timeStep = maxDepth, 0
-        self.initialState = initialState
+
+        self.model, self.initialState, self.maxDepth, self.timeStep = model, initialState, maxDepth, 0
+        self.reward = self.rl = lambda: 0
 
         if self.model:
             self.performAction = lambda _: None
@@ -44,15 +45,13 @@ class RLAgent(threading.Thread):
     def initialize(self):
         if self.model:
             self.state = self.model.initialize(self.initialState)
-            self.actions = {'moveForward': None, 'yawCW': None, 'yawCCW': None, 'hover': None}
+            actions = ['moveForward', 'yawCW', 'yawCCW', 'hover']
+            self.actions = {a: lambda: self.setCurrentAction(action=a) for a in actions}
         else:
             self.initializeConnection()
-            moveByVelocityZ = partial(self.client.moveByVelocityZ, vx=0, vy=0, z=-self.defaultAltitude,
-                                      yaw_mode=YawMode(True, 0),
-                                      duration=10.0, drivetrain=DrivetrainType.MaxDegreeOfFreedom)
 
             self.actions = {'moveForward': self.moveForward, 'yawCW': partial(self.yaw, self.yawRate),
-                            'yawCCW': partial(self.yaw, -self.yawRate), 'hover': moveByVelocityZ}
+                            'yawCCW': partial(self.yaw, -self.yawRate), 'hover': self.moveByVelocityZ}
 
             self.initializeState()
 
@@ -93,66 +92,11 @@ class RLAgent(threading.Thread):
     def getGoalMargins(self):
         return self.goalMargins
 
-    @staticmethod
-    def getPosition(**kwargs):
-        return kwargs['agent'].client.getPosition().toNumpyArray()
+    def getCurrentAction(self):
+        return self.currentAction
 
-    @staticmethod
-    def getOrientation(**kwargs):
-        return Quaternion(kwargs['agent'].client.getOrientation().toNumpyArray())
-
-    @staticmethod
-    def getVelocity(**kwargs):
-        return kwargs['agent'].client.getVelocity().toNumpyArray()
-
-    @staticmethod
-    def getAngularVelocity(**kwargs):
-        return kwargs['agent'].client.getAngularVelocity().toNumpyArray()
-
-    @staticmethod
-    def getAngularAcceleration(**kwargs):
-        return kwargs['agent'].client.getAngularAcceleration().toNumpyArray()
-
-    @staticmethod
-    def getLinearAcceleration(**kwargs):
-        return kwargs['agent'].client.getLinearAcceleration().toNumpyArray()
-
-    @staticmethod
-    def getCurrentAction(**kwargs):
-        return kwargs['agent'].currentAction
-
-    @staticmethod
-    def isGoal(agent):
-        return agent.getState().areEqual(agent.goal, agent.goalMargins) if agent.getGoal() else False
-
-    @staticmethod
-    def getCollisionInfo(agent):
-        return agent.hitObstacleFlag
-
-    @staticmethod
-    def getHorizontalDistance(p1, p2):
-        return ((p1.x - p2.x) ** 2 +
-                (p1.y - p2.y) ** 2) ** 0.5
-
-    @staticmethod
-    def onPress(key, token):
-        token.update(key)
-
-    @staticmethod
-    def onRelease(key, token):
-        token.clear()
-
-    def moveForward(self):
-        velocityBody = np.array([self.defaultSpeed, 0, 0])
-        # temporary hack for performance
-        velocityEarth = transformToEarthFrame(velocityBody, self.getState().orientation)
-        self.performAction(partial(self.actions['hover'], vx=velocityEarth[0], vy=velocityEarth[1]))
-
-    def yaw(self, rate):
-        # temporary hack for performance
-        velocityEarth = self.getState().linearVelocity
-        self.performAction(
-            partial(self.actions['hover'], vx=velocityEarth[0], vy=velocityEarth[1], yaw_mode=YawMode(True, rate)))
+    def setCurrentAction(self, action):
+        self.currentAction = action
 
     def isTerminal(self):
         return len([True for i in self.isTerminalConditions if i(agent=self)])
@@ -168,7 +112,7 @@ class RLAgent(threading.Thread):
 
     def updateState(self):
         if self.model:
-            self.state = self.model.updateState(state=self.getState(), action=self.currentAction)
+            self.state = self.model.updateState(state=self.getState(), action=self.getCurrentAction())
         else:
             self.state = self.state.updateState(self)
 
@@ -183,6 +127,26 @@ class RLAgent(threading.Thread):
         except Exception as e:
             self.logger.critical(e)
 
+    def moveByVelocityZ(self):
+        return partial(self.client.moveByVelocityZ, vx=0, vy=0, z=-self.defaultAltitude,
+                       yaw_mode=YawMode(True, 0),
+                       duration=10.0, drivetrain=DrivetrainType.MaxDegreeOfFreedom)
+
+    def hover(self):
+        self.performAction(self.moveByVelocityZ())
+
+    def moveForward(self):
+        velocityBody = np.array([self.defaultSpeed, 0, 0])
+        # temporary hack for performance
+        velocityEarth = transformToEarthFrame(velocityBody, self.getState().orientation)
+        self.performAction(partial(self.moveByVelocityZ(), vx=velocityEarth[0], vy=velocityEarth[1]))
+
+    def yaw(self, rate):
+        # temporary hack for performance
+        velocityEarth = self.getState().linearVelocity
+        self.performAction(
+            partial(self.actions['hover'], vx=velocityEarth[0], vy=velocityEarth[1], yaw_mode=YawMode(True, rate)))
+
     def setRl(self, callback):
         # set rl function = client callback
         f = partial(callback, agent=self)
@@ -194,9 +158,6 @@ class RLAgent(threading.Thread):
         # set reward function = client callback
         f = partial(callback, agent=self)
         self.reward = f
-
-    def reward(self):
-        return 0
 
     def reset(self):
         self.logger.info("Resetting")
@@ -219,12 +180,12 @@ class RLAgent(threading.Thread):
         while True:
             if self.model is None and self.timeStep == 0:
                 self.updateState()
+
             start = time.time()
             # give turn to the agent
-            a = callback.__next__()
+            a = next(callback)
             # perform action selected by the agent
             self.performAction(self.actions[a])
-            self.currentAction = a
 
             # delay to match agent's decision freq.
             while time.time() - start < period - error:
@@ -235,7 +196,7 @@ class RLAgent(threading.Thread):
             s, r, isTerminal = self.getState(), self.reward(), self.isTerminal()
 
             # send agent the the transition reward, new state and isTerminal and wait until the agent yields (OK signal)
-            callback.__next__()
+            next(callback)
             callback.send((r, s, isTerminal))
 
             if self.timeStep % self.decisionFrequency == 0:
