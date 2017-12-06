@@ -25,7 +25,7 @@ def virtualAgent(method):
         pass
 
     methods = {'initialize': initialize, 'initializeState': initializeState, 'isTerminal': isTerminal,
-               'updateState': updateState, 'performAction': performAction, 'reset': reset}
+               'updateState': updateState}
 
     return methods.get(methodName, doNothing)
 

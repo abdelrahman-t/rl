@@ -40,7 +40,7 @@ def getHorizontalDistance(p1, p2):
             (p1.y - p2.y) ** 2) ** 0.5
 
 
-def horizontalDistanceGoal(**kwargs):
+def getHorizontalDistanceGoal(**kwargs):
     return ((kwargs['agent'].getGoal().position[0] - kwargs['partialUpdate'].position[0]) ** 2 +
             (kwargs['agent'].getGoal().position[1] - kwargs['partialUpdate'].position[1]) ** 2) ** 0.5
 

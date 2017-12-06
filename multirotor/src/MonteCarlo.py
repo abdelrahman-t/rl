@@ -1,9 +1,7 @@
 ﻿from Utilities import *
+from Common import *
 from RLAgent import *
 from Model import *
-
-from sklearn.externals import joblib
-from queue import Queue
 
 
 def reward(agent):
@@ -74,9 +72,8 @@ def main():
     # state is lazily updated by the environment as the agent needs it , agent always get the freshest estimate of the
     # state, state updates are done by the environment in a rate that corresponds to agent decision making freq.
 
-    agent.defineState(orientation=RLAgent.getOrientation, angularVelocity=RLAgent.getAngularVelocity,
-                      linearVelocity=RLAgent.getVelocity,
-                      position=RLAgent.getPosition, goal=horizontalDistanceGoal)
+    agent.defineState(orientation=getOrientation, angularVelocity=getAngularVelocity,
+                      linearVelocity=getVelocity, position=getPosition, goal=getHorizontalDistanceGoal)
 
     agent.setRl(monteCarlo)
     agent.setReward(reward)

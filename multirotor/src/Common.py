@@ -10,6 +10,8 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 from numpy import array, zeros, float32
+from sklearn.externals import joblib
+from queue import Queue
 from copy import deepcopy
 import win32com.client
 from AirSim import *
