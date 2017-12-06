@@ -6,11 +6,6 @@ from sklearn.externals import joblib
 from queue import Queue
 
 
-def horizontalDistanceGoal(**kwargs):
-    return ((kwargs['agent'].getGoal().position[0] - kwargs['partialUpdate'].position[0]) ** 2 +
-            (kwargs['agent'].getGoal().position[1] - kwargs['partialUpdate'].position[1]) ** 2) ** 0.5
-
-
 def reward(agent):
     terminalStateReward = (1.0e2, -1.0e2)
     wPositionX = wPositionY = 1
@@ -49,7 +44,7 @@ def monteCarlo(agent, maxDepth=10, trials=10, frequency=10):
             queue_, qs = Queue(), {i: [] for i in actions}
 
             for a in np.repeat(actions, trials):
-                virtualAgent, isTerminal = RLAgent('virtual', model=model, decisionFrequency=math.inf,
+                virtualAgent, isTerminal = RLAgent('virtual', alternativeModel=model, decisionFrequency=math.inf,
                                                    maxDepth=maxDepth, initialState=initialState), False
                 virtualAgent.setReward(reward)
                 virtualAgent.goal = agent.getGoal()

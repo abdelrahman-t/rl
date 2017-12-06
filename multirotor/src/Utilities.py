@@ -1,4 +1,5 @@
 from Common import *
+from VectorMath import *
 
 
 class KeyT:
@@ -67,27 +68,27 @@ def getAveragesBody(df, limit, frequency):
             transformToBodyFrame(linearAccelerations[i], q)
 
         angularVelocities[i] = \
-            transformAngularRateToBody(angularVelocities[i], q)
+            transformToBodyFrame(getAngularVelocityVector(*angularVelocities[i]), q)
 
         angularAccelerations[i] = \
-            transformAngularRateToBody(angularAccelerations[i], q)
+            transformToBodyFrame(getAngularVelocityVector(*angularAccelerations[i]), q)
 
     return linearVelocities[1:], angularVelocities[1:], linearAccelerations[1:], angularAccelerations[1:]
 
 
-def getInputOutputAccelerationModel(df, frequency, limit=500):
+def getXyAccelerationModel(df, frequency, limit=500):
     v, w, a, alpha = getAveragesBody(df, limit, frequency=frequency)
     X, y = np.zeros((limit, 12)), np.zeros((limit, 6))
 
-    inverseKeymap = ['moveForward', 'yawCCW', 'yawCW', 'hover']
+    actionNames = ['moveForward', 'yawCCW', 'yawCW', 'hover']
 
     for i in range(limit - 2):
         rowi, action = df.iloc[i + 1], df.loc[i + 2, 'aName']
         X[i] = np.concatenate(
-            (v[i], w[i], [rowi['roll']], [rowi['pitch']], [0 if a != action else 1 for a in inverseKeymap]))
+            (v[i], w[i], [rowi['roll']], [rowi['pitch']], [0 if a != action else 1 for a in actionNames]))
         y[i] = np.concatenate((a[i], alpha[i]))
 
-    xColumns = ['dXB', 'dYB', 'dZB', 'dRoll', 'dPitch', 'dYaw', 'roll', 'pitch'] + [i for i in inverseKeymap]
+    xColumns = ['dXB', 'dYB', 'dZB', 'dRoll', 'dPitch', 'dYaw', 'roll', 'pitch'] + [i for i in actionNames]
     yColumns = ['d2XB', 'd2YB', 'd2ZB', 'd2Roll', 'd2Pitch', 'd2Yaw']
     X, y = pd.DataFrame(X, columns=xColumns), \
            pd.DataFrame(y, columns=yColumns)

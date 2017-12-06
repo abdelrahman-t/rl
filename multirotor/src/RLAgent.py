@@ -1,16 +1,40 @@
 from Common import *
 from Utilities import *
-from VectorMath import *
 from AgentHelpers import *
 from abc import ABCMeta
 
 
-# TODO: refactor
+def virtualAgent(method):
+    methodName = method.__name__
+
+    def initialize(self):
+        self.state = self.alternativeModel.initialize(self.initialState)
+        actions = ['moveForward', 'yawCW', 'yawCCW', 'hover']
+        self.actions = {a: lambda: None for a in actions}
+
+    def initializeState(self):
+        pass
+
+    def isTerminal(self):
+        return (self.timeStep >= self.maxDepth) if self.alternativeModel else self.isTerminal()
+
+    def updateState(self):
+        self.state = self.alternativeModel.updateState(state=self.getState(), action=self.getCurrentAction())
+
+    def doNothing(*args, **kwargs):
+        pass
+
+    methods = {'initialize': initialize, 'initializeState': initializeState, 'isTerminal': isTerminal,
+               'updateState': updateState, 'performAction': performAction, 'reset': reset}
+
+    return methods.get(methodName, doNothing)
+
+
 class RLAgent(threading.Thread):
     __metaclass__ = ABCMeta
 
-    def __init__(self, name, model=None, maxDepth=20, initialState=None, serverIpAddress='127.0.0.1', defaultSpeed=3,
-                 defaultAltitude=1.5, yawRate=70, decisionFrequency=10, learningRate=0.01, discount=1,
+    def __init__(self, name, alternativeModel=None, maxDepth=20, initialState=None, serverIpAddress='127.0.0.1',
+                 defaultSpeed=3, defaultAltitude=1.5, yawRate=70, decisionFrequency=10, learningRate=0.01, discount=1,
                  crashRecoveryPeriod=16, logFlight=False, logFileName=getDateTime().strip()):
 
         threading.Thread.__init__(self, name=name)
@@ -34,26 +58,17 @@ class RLAgent(threading.Thread):
                                                   on_release=partial(onRelease, token=self.keyPressed))
         self.keyboardListener.start()
 
-        self.model, self.initialState, self.maxDepth, self.timeStep = model, initialState, maxDepth, 0
+        self.alternativeModel, self.initialState, self.maxDepth, self.timeStep = alternativeModel, initialState, maxDepth, 0
         self.reward = self.rl = lambda: 0
 
-        if self.model:
-            self.performAction = lambda _: None
-            self.reset = lambda: None
-            self.isTerminal = lambda: self.timeStep >= self.maxDepth
-
+    @virtualAgent
     def initialize(self):
-        if self.model:
-            self.state = self.model.initialize(self.initialState)
-            actions = ['moveForward', 'yawCW', 'yawCCW', 'hover']
-            self.actions = {a: lambda: self.setCurrentAction(action=a) for a in actions}
-        else:
-            self.initializeConnection()
+        self.initializeConnection()
 
-            self.actions = {'moveForward': self.moveForward, 'yawCW': partial(self.yaw, self.yawRate),
-                            'yawCCW': partial(self.yaw, -self.yawRate), 'hover': self.moveByVelocityZ}
+        self.actions = {'moveForward': self.moveForward, 'yawCW': partial(self.yaw, self.yawRate),
+                        'yawCCW': partial(self.yaw, -self.yawRate), 'hover': self.moveByVelocityZ}
 
-            self.initializeState()
+        self.initializeState()
 
     def initializeConnection(self):
         try:
@@ -76,7 +91,7 @@ class RLAgent(threading.Thread):
         time.sleep(5)
         self.updateState()
 
-        # enable programmatic control of the multirotor and reset collision flag
+        # enable programmatic control of the multi-rotor and reset collision flag
         self.hitObstacleFlag = False
         self.logger.info("Ready")
 
@@ -98,6 +113,7 @@ class RLAgent(threading.Thread):
     def setCurrentAction(self, action):
         self.currentAction = action
 
+    @virtualAgent
     def isTerminal(self):
         return len([True for i in self.isTerminalConditions if i(agent=self)])
 
@@ -110,17 +126,16 @@ class RLAgent(threading.Thread):
     def getGoal(self):
         return self.goal
 
+    @virtualAgent
     def updateState(self):
-        if self.model:
-            self.state = self.model.updateState(state=self.getState(), action=self.getCurrentAction())
-        else:
-            self.state = self.state.updateState(self)
+        self.state = self.state.updateState(self)
 
     def getActions(self, all=False):
         # all parameter=true will return all actions the agents have regardless of context,
         # as some actions might not be accessible to the agent depending on state (feature to be completed)
         return list(self.actions.keys())
 
+    @virtualAgent
     def performAction(self, action):
         try:
             action()
@@ -159,6 +174,7 @@ class RLAgent(threading.Thread):
         f = partial(callback, agent=self)
         self.reward = f
 
+    @virtualAgent
     def reset(self):
         self.logger.info("Resetting")
         # resetting environment , the old way. make sure simulator window is active!
@@ -168,22 +184,15 @@ class RLAgent(threading.Thread):
         self.initialize()
         callback = self.rl()
 
-        logFileStream = open('datasets/' + self.logFileName, 'wb') if self.logFlight else None
-        logToFile = lambda data: pickle.dump(data, logFileStream, protocol=pickle.HIGHEST_PROTOCOL)
-        flightLogger = logToFile if logFileStream else lambda _: False
-
-        # write log file header
-        stateKeys = self.getState().getKeys()
-        flightLogger(stateKeys)
-
         self.timeStep, period, error = 0, 1 / self.decisionFrequency, 0
-        while True:
-            if self.model is None and self.timeStep == 0:
-                self.updateState()
+        while self.isTerminal():
+            self.updateState()
 
             start = time.time()
+
             # give turn to the agent
             a = next(callback)
+            self.setCurrentAction(a)
             # perform action selected by the agent
             self.performAction(self.actions[a])
 
@@ -202,19 +211,14 @@ class RLAgent(threading.Thread):
             if self.timeStep % self.decisionFrequency == 0:
                 self.logger.debug((['{}={}'.format(key, getattr(s, key)) for key in stateKeys], isTerminal))
 
-            flightLogger(s)
-
-            if self.isTerminal():
-                if self.model:
-                    break
-                # disarm agent
-                self.performAction(self.client.disarm)
-                # reset environment
-                self.reset()
-                # get agent into initial state
-                self.initializeState()
-
             self.timeStep += 1
+
+        # disarm agent
+        self.performAction(self.client.disarm)
+        # reset environment
+        self.reset()
+        # get agent into initial state
+        self.initializeState()
 
     def saveProgress(self, progress, fileName, append=False):
         try:

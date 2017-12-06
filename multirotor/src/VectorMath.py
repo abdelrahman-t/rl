@@ -91,7 +91,7 @@ def getAverageAngularAcceleration(angularVelocity1, angularVelocity0, frequency)
 
 
 def getAverageAngularVelocity(angularPosition1, angularPosition0, frequency):
-    return getAverage(m1=angularPosition1, m0=angularPosition0, wrap=wrapAngleAroundPi)
+    return getAverage(m1=angularPosition1, m0=angularPosition0, frequency=frequency, wrap=wrapAngleAroundPi)
 
 
 def integrate(initial, rate, frequency, wrap=lambda _: _):
@@ -118,7 +118,6 @@ def integratePosition(initialPosition, linearVelocityEarth, frequency):
 def integrateTrajectoryAccelerationBody(initialPosition, initialOrientation, initialLinearVelocityBody,
                                         initialAngularVelocityBody, linearAccelerationsBody, angularAccelerationsBody,
                                         frequency):
-
     for aBody, alphaBody, f in zip(linearAccelerationsBody, angularAccelerationsBody, frequency):
         angularVelocityEarth = transformToEarthFrame(integrateAngularVelocity(initialAngularVelocityBody, alphaBody, f),
                                                      initialOrientation)
