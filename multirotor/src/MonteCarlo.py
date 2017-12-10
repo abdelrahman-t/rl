@@ -2,6 +2,7 @@
 from Common import *
 from RLAgent import *
 from Model import *
+from itertools import count
 
 
 def reward(agent):
@@ -10,7 +11,7 @@ def reward(agent):
     g, s1 = agent.getGoal(), agent.getState()
 
     if agent.isTerminal():
-        r = terminalStateReward[0] if agent.isGoal(agent) else terminalStateReward[1]
+        r = terminalStateReward[0] if isGoal(agent=agent) else terminalStateReward[1]
     else:
         # −(αx(x − x∗) **2 + αy(y − y∗) **2)
         r = -(wPositionX * (s1.position[0] - g.position[0]) ** 2 + (wPositionY * (s1.position[1] - g.position[1]) ** 2))
@@ -18,27 +19,37 @@ def reward(agent):
     return r
 
 
-def monteCarloSearch(agent, callback):
-    policy, q = lambda: np.random.randint(0, 4), 0.0
+def monteCarloSearch(agent, callback, actions):
+    q, isTerminal = 0.0, False
+    timestep = count()
 
-    while True:
-        yield agent.getActions()[policy()]
+    while not isTerminal:
+        yield actions[next(timestep)]
         r, nextState, isTerminal = (yield)
+
         q += r
+
         if isTerminal:
             callback(q=q)
         yield
 
 
+def getRandomActions(start, actions, depth):
+    sequence = actions[np.random.randint(len(actions), size=depth)]
+    sequence[0] = start
+
+    return sequence
+
+
 # to do: use multiprocessing instead of threading as GIL renders the threaded approach useless!!
 # thread-safety is not enforced, code is only thread-safe on CPython
-def monteCarlo(agent, maxDepth=10, trials=10, frequency=10):
-    model = AccelerationModel(regressionModel=joblib.load('neural.model'), frequency=frequency)
+def monteCarlo(agent, maxDepth=10, trials=30, frequency=10):
+    model = AccelerationModel(regressionModel=joblib.load('models/mlp.model'), frequency=frequency)
+    actions = np.array(agent.getActions())
 
     while True:
         initialState, isTerminal = agent.getState(), False
         while isTerminal is False:
-            actions = agent.getActions()
             queue_, qs = Queue(), {i: [] for i in actions}
 
             for a in np.repeat(actions, trials):
@@ -48,12 +59,14 @@ def monteCarlo(agent, maxDepth=10, trials=10, frequency=10):
                 virtualAgent.goal = agent.getGoal()
                 virtualAgent.goalMargins = agent.getGoalMargins()
                 virtualAgent.setRl(
-                    partial(monteCarloSearch, callback=lambda q: (qs[a].append(q), queue_.get(), queue_.task_done())))
+                    partial(monteCarloSearch, actions=getRandomActions(a, actions, maxDepth),
+                            callback=lambda q: (qs[a].append(q), queue_.get(), queue_.task_done())))
 
                 queue_.put(a)
                 virtualAgent.start()
 
             queue_.join()
+
             yield actions[np.argmax([np.average(qs[a]) for a in actions])]
             r, nextState, isTerminal = (yield)
 

@@ -4,7 +4,7 @@ from AgentHelpers import *
 from abc import ABCMeta
 
 
-def virtualAgent(method):
+def isVirtualAgent(method):
     methodName = method.__name__
 
     def initialize(self):
@@ -16,7 +16,7 @@ def virtualAgent(method):
         pass
 
     def isTerminal(self):
-        return (self.timeStep >= self.maxDepth) if self.alternativeModel else self.isTerminal()
+        return self.timeStep >= self.maxDepth
 
     def updateState(self):
         self.state = self.alternativeModel.updateState(state=self.getState(), action=self.getCurrentAction())
@@ -27,7 +27,17 @@ def virtualAgent(method):
     methods = {'initialize': initialize, 'initializeState': initializeState, 'isTerminal': isTerminal,
                'updateState': updateState}
 
-    return methods.get(methodName, doNothing)
+    f1, f2 = method, methods.get(methodName, doNothing)
+
+    def selector(*args):
+        self = args[0]
+        if self.alternativeModel:
+            return f2(*args)
+
+        else:
+            return f1(*args)
+
+    return selector
 
 
 class RLAgent(threading.Thread):
@@ -58,10 +68,12 @@ class RLAgent(threading.Thread):
                                                   on_release=partial(onRelease, token=self.keyPressed))
         self.keyboardListener.start()
 
-        self.alternativeModel, self.initialState, self.maxDepth, self.timeStep = alternativeModel, initialState, maxDepth, 0
+        self.alternativeModel, self.initialState, self.maxDepth, self.timeStep =\
+            alternativeModel, initialState, maxDepth, 0
+
         self.reward = self.rl = lambda: 0
 
-    @virtualAgent
+    @isVirtualAgent
     def initialize(self):
         self.initializeConnection()
 
@@ -113,7 +125,7 @@ class RLAgent(threading.Thread):
     def setCurrentAction(self, action):
         self.currentAction = action
 
-    @virtualAgent
+    @isVirtualAgent
     def isTerminal(self):
         return len([True for i in self.isTerminalConditions if i(agent=self)])
 
@@ -126,7 +138,7 @@ class RLAgent(threading.Thread):
     def getGoal(self):
         return self.goal
 
-    @virtualAgent
+    @isVirtualAgent
     def updateState(self):
         self.state = self.state.updateState(self)
 
@@ -135,17 +147,18 @@ class RLAgent(threading.Thread):
         # as some actions might not be accessible to the agent depending on state (feature to be completed)
         return list(self.actions.keys())
 
-    @virtualAgent
+    @isVirtualAgent
     def performAction(self, action):
         try:
             action()
         except Exception as e:
             self.logger.critical(e)
 
-    def moveByVelocityZ(self):
-        return partial(self.client.moveByVelocityZ, vx=0, vy=0, z=-self.defaultAltitude,
-                       yaw_mode=YawMode(True, 0),
-                       duration=10.0, drivetrain=DrivetrainType.MaxDegreeOfFreedom)
+    def moveByVelocityZ(self, vx=0, vy=0, yawMode=YawMode(True, 0), drivetrain=DrivetrainType.MaxDegreeOfFreedom,
+                        duration=10.0):
+
+        self.client.moveByVelocityZ(vx=vx, vy=vy, z=-self.defaultAltitude, yaw_mode=yawMode, duration=duration,
+                                    drivetrain=drivetrain)
 
     def hover(self):
         self.performAction(self.moveByVelocityZ())
@@ -154,13 +167,13 @@ class RLAgent(threading.Thread):
         velocityBody = np.array([self.defaultSpeed, 0, 0])
         # temporary hack for performance
         velocityEarth = transformToEarthFrame(velocityBody, self.getState().orientation)
-        self.performAction(partial(self.moveByVelocityZ(), vx=velocityEarth[0], vy=velocityEarth[1]))
+        self.performAction(partial(self.moveByVelocityZ, vx=velocityEarth[0], vy=velocityEarth[1]))
 
     def yaw(self, rate):
         # temporary hack for performance
         velocityEarth = self.getState().linearVelocity
         self.performAction(
-            partial(self.actions['hover'], vx=velocityEarth[0], vy=velocityEarth[1], yaw_mode=YawMode(True, rate)))
+            partial(self.actions['hover'], vx=velocityEarth[0], vy=velocityEarth[1], yawMode=YawMode(True, rate)))
 
     def setRl(self, callback):
         # set rl function = client callback
@@ -174,20 +187,21 @@ class RLAgent(threading.Thread):
         f = partial(callback, agent=self)
         self.reward = f
 
-    @virtualAgent
+    @isVirtualAgent
     def reset(self):
         self.logger.info("Resetting")
         # resetting environment , the old way. make sure simulator window is active!
         self.shell.SendKeys('\b')
 
-    def run(self):
+    def run(self, error=0):
         self.initialize()
         callback = self.rl()
 
-        self.timeStep, period, error = 0, 1 / self.decisionFrequency, 0
-        while self.isTerminal():
-            self.updateState()
+        self.timeStep, period = 0, 1 / self.decisionFrequency
+        stateKeys = self.getState().getKeys()
 
+        while not self.isTerminal():
+            self.timeStep += 1
             start = time.time()
 
             # give turn to the agent
@@ -208,17 +222,15 @@ class RLAgent(threading.Thread):
             next(callback)
             callback.send((r, s, isTerminal))
 
-            if self.timeStep % self.decisionFrequency == 0:
-                self.logger.debug((['{}={}'.format(key, getattr(s, key)) for key in stateKeys], isTerminal))
-
-            self.timeStep += 1
+            # if self.timeStep % self.decisionFrequency == 0:
+            #     self.logger.debug((['{}={}'.format(key, getattr(s, key)) for key in stateKeys], isTerminal))
 
         # disarm agent
-        self.performAction(self.client.disarm)
+        # self.performAction(partial(self.client.armDisarm, False))
         # reset environment
-        self.reset()
+        # self.reset()
         # get agent into initial state
-        self.initializeState()
+        # self.initializeState()
 
     def saveProgress(self, progress, fileName, append=False):
         try:

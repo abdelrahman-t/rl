@@ -1,7 +1,4 @@
-﻿import csv
-import pandas as pd
-
-from RLAgent import *
+﻿from RLAgent import *
 from Utilities import *
 
 
@@ -34,7 +31,9 @@ def flightLogger(agent, dataset=None, baseFrequency=10):
             f = 1 / (nextState.lastUpdate - initialState.lastUpdate)
 
             linearVelocityBody = transformToBodyFrame(nextState.linearVelocity, nextState.orientation)
-            orientationEuler = getRollPitchYaw(nextState.orientation)
+            orientationEuler = toEulerianAngle(nextState.orientation)
+
+            linearAccelerationBody = transformToBodyFrame(nextState.linearAcceleration, nextState.orientation)
 
             records = {
                 # [time-step, frequency, numerical value of selected action, action description]
@@ -60,8 +59,8 @@ def flightLogger(agent, dataset=None, baseFrequency=10):
 
                 # -----------------
                 # next Linear Accelerations in Body [Instantaneous]
-                'd2XB': nextState.linearAcceleration[0], 'd2YB': nextState.linearAcceleration[1],
-                'd2ZB': nextState.linearAcceleration[2],
+                'd2XB': linearAccelerationBody[0], 'd2YB': linearAccelerationBody[1],
+                'd2ZB': linearAccelerationBody[2],
 
                 # ----------------
                 # next Angular Velocities Body [instantaneous]
@@ -90,12 +89,12 @@ def flightLogger(agent, dataset=None, baseFrequency=10):
 
 
 def main():
-    agent = RLAgent('agent', decisionFrequency=10.0, defaultSpeed=4, defaultAltitude=6, yawRate=70)
+    agent = RLAgent('agent', decisionFrequency=30.0, defaultSpeed=4, defaultAltitude=6, yawRate=60)
 
-    agent.defineState(orientation=RLAgent.getOrientation, position=RLAgent.getPosition,
-                      angularVelocity=RLAgent.getAngularVelocity, linearVelocity=RLAgent.getVelocity,
-                      linearAcceleration=RLAgent.getLinearAcceleration,
-                      angularAcceleration=RLAgent.getAngularAcceleration)
+    agent.defineState(orientation=getOrientation, position=getPosition,
+                      angularVelocity=getAngularVelocity, linearVelocity=getVelocity,
+                      linearAcceleration=getLinearAcceleration,
+                      angularAcceleration=getAngularAcceleration)
 
     agent.setRl(partial(flightLogger, dataset='datasets/' + 'replay.csv'))
     agent.start()

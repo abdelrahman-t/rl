@@ -34,10 +34,10 @@ def createConsoleLogger(name, level=None):
 
 
 def truncateFloat(number, decimalPlaces):
-    return ("{0:.%sf}" % decimalPlaces).format(number)
+    return ('{0:.%sf}' % decimalPlaces).format(number)
 
 
-def getAveragesBody(df, limit, frequency):
+def getAveragesBody(df, limit, frequency, body=True):
     shape = (limit, 3)
     linearVelocities, linearAccelerations = np.zeros(shape), np.zeros(shape)
     angularVelocities, angularAccelerations = np.zeros(shape), np.zeros(shape)
@@ -58,22 +58,48 @@ def getAveragesBody(df, limit, frequency):
         angularAccelerations[i] = \
             getAverageAngularAcceleration(angularVelocities[i + 1], angularVelocities[i], frequency)
 
-    for i in range(1, limit):
-        q = df.loc[i, ['scalar', 'i', 'j', 'k']].values
+    if body:
+        for i in range(1, limit):
+            q = df.loc[i, ['scalar', 'i', 'j', 'k']].values
+            euler = toEulerianAngle(q)
 
-        linearVelocities[i] = \
-            transformToBodyFrame(linearVelocities[i], q)
+            linearVelocities[i] = \
+                transformToBodyFrame(linearVelocities[i], q)
 
-        linearAccelerations[i] = \
-            transformToBodyFrame(linearAccelerations[i], q)
+            linearAccelerations[i] = \
+                transformToBodyFrame(linearAccelerations[i], q)
 
-        angularVelocities[i] = \
-            transformToBodyFrame(getAngularVelocityVector(*angularVelocities[i]), q)
+            angularVelocities[i] = \
+                transformEulerRatesToBody(angularVelocities[i], euler)
 
-        angularAccelerations[i] = \
-            transformToBodyFrame(getAngularVelocityVector(*angularAccelerations[i]), q)
+            angularAccelerations[i] = \
+                transformEulerRatesToBody(angularAccelerations[i], euler)
 
     return linearVelocities[1:], angularVelocities[1:], linearAccelerations[1:], angularAccelerations[1:]
+
+
+def getXyVelocityModel(df, frequency, limit=500):
+    print('velocity')
+    v, w, a, alpha = getAveragesBody(df, limit, frequency=frequency, body=False)
+    X, y = np.zeros((limit, 12)), np.zeros((limit, 6))
+
+    actionNames = ['moveForward', 'yawCCW', 'yawCW', 'hover']
+    xColumns = ['dXB', 'dYB', 'dZB', 'dRoll', 'dPitch', 'dYaw', 'roll', 'pitch'] + [i for i in actionNames]
+    yColumns = ['dXB', 'dYB', 'dZB', 'dRoll', 'dPitch', 'dYaw']
+
+    for i, j, k in zip(range(limit - 2), range(1, limit - 2), range(2, limit - 2)):
+        roll, pitch = df.loc[j, ['roll', 'pitch']].values
+        selectedAction = [0 if a != df.loc[k, 'aName'] else 1 for a in actionNames]
+
+        q = df.loc[j, ['scalar', 'i', 'j', 'k']].values
+        euler = toEulerianAngle(q)
+
+        X[i] = np.concatenate((transformToBodyFrame(v[i], q), transformEulerRatesToBody(w[i], euler),
+                               [roll, pitch], selectedAction))
+
+        y[i] = np.concatenate((transformToBodyFrame(v[j], q), transformEulerRatesToBody(w[j], euler)))
+
+    return pd.DataFrame(X, columns=xColumns), pd.DataFrame(y, columns=yColumns)
 
 
 def getXyAccelerationModel(df, frequency, limit=500):
@@ -81,19 +107,17 @@ def getXyAccelerationModel(df, frequency, limit=500):
     X, y = np.zeros((limit, 12)), np.zeros((limit, 6))
 
     actionNames = ['moveForward', 'yawCCW', 'yawCW', 'hover']
-
-    for i in range(limit - 2):
-        rowi, action = df.iloc[i + 1], df.loc[i + 2, 'aName']
-        X[i] = np.concatenate(
-            (v[i], w[i], [rowi['roll']], [rowi['pitch']], [0 if a != action else 1 for a in actionNames]))
-        y[i] = np.concatenate((a[i], alpha[i]))
-
     xColumns = ['dXB', 'dYB', 'dZB', 'dRoll', 'dPitch', 'dYaw', 'roll', 'pitch'] + [i for i in actionNames]
     yColumns = ['d2XB', 'd2YB', 'd2ZB', 'd2Roll', 'd2Pitch', 'd2Yaw']
-    X, y = pd.DataFrame(X, columns=xColumns), \
-           pd.DataFrame(y, columns=yColumns)
 
-    return X, y
+    for i, j, k in zip(range(limit - 2), range(1, limit - 2), range(2, limit - 2)):
+        roll, pitch = df.loc[j, ['roll', 'pitch']].values
+        selectedAction = [0 if a != df.loc[k, 'aName'] else 1 for a in actionNames]
+
+        X[i] = np.concatenate((v[i], w[i], [roll, pitch], selectedAction))
+        y[i] = np.concatenate((a[i], alpha[i]))
+
+    return pd.DataFrame(X, columns=xColumns), pd.DataFrame(y, columns=yColumns)
 
 
 class StateT:
