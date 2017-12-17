@@ -13,18 +13,14 @@ from numpy import array, zeros, float32
 from sklearn.externals import joblib
 from queue import Queue
 from copy import deepcopy
-import win32com.client
 from AirSim import *
 import math
-import pythoncom
 import pickle
 import threading
 import csv
-import win32gui
 import warnings
 import logging
 import sys
-import socket
 import types
 import time
 import cv2

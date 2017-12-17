@@ -7,15 +7,13 @@ def flightLogger(agent, dataset=None, baseFrequency=10):
     keymap.update([('Key.up', 'moveForward'), ('Key.left', 'yawCCW'), ('Key.right', 'yawCW'), ('Key.down', 'hover')])
     inverseKeymap = {'moveForward': 8, 'yawCCW': 4, 'yawCW': 6, 'hover': 5}
 
-    try:
+    counter = count(1)
+    writer, timeStep = None, next(counter)
+    if dataset:
         df = pd.read_csv(dataset)
         aIndices, aNames = df['aIndex'].values, df['aName'].values
         indices = np.repeat(df.index.values, agent.decisionFrequency // baseFrequency)
 
-    except Exception as e:
-        pass
-
-    writer, timeStep = None, 1
     with open('datasets/' + getDateTime().strip() + '.csv', 'w') as csvfile:
         while True:
             initialState, a = agent.getState(), agent.keyPressed.value
@@ -28,13 +26,8 @@ def flightLogger(agent, dataset=None, baseFrequency=10):
 
             yield selectedAction
             r, nextState, isTerminal = (yield)
+
             f = 1 / (nextState.lastUpdate - initialState.lastUpdate)
-
-            linearVelocityBody = transformToBodyFrame(nextState.linearVelocity, nextState.orientation)
-            orientationEuler = toEulerianAngle(nextState.orientation)
-
-            linearAccelerationBody = transformToBodyFrame(nextState.linearAcceleration, nextState.orientation)
-
             records = {
                 # [time-step, frequency, numerical value of selected action, action description]
                 'timestep': timeStep, 'frequency': f, 'period': timeStep // agent.decisionFrequency,
@@ -49,18 +42,15 @@ def flightLogger(agent, dataset=None, baseFrequency=10):
                 'scalar': nextState.orientation[0], 'i': nextState.orientation[1], 'j': nextState.orientation[2],
                 'k': nextState.orientation[3],
 
-                # ----------------
-                # next Orientation [(roll, pitch, yaw) or (x, y, z)]
-                'roll': orientationEuler[0], 'pitch': orientationEuler[1], 'yaw': orientationEuler[2],
+                # -----------------
+                # next Linear Velocities in Earth [Instantaneous]
+                'dXB': nextState.linearVelocity[0], 'dYB': nextState.linearVelocity[1],
+                'dZB': nextState.linearVelocity[2],
 
                 # -----------------
-                # next Linear Velocities in Body [Instantaneous]
-                'dXB': linearVelocityBody[0], 'dYB': linearVelocityBody[1], 'dZB': linearVelocityBody[2],
-
-                # -----------------
-                # next Linear Accelerations in Body [Instantaneous]
-                'd2XB': linearAccelerationBody[0], 'd2YB': linearAccelerationBody[1],
-                'd2ZB': linearAccelerationBody[2],
+                # next Linear Accelerations in Earth [Instantaneous]
+                'd2XB': nextState.linearAcceleration[0], 'd2YB': nextState.linearAcceleration[1],
+                'd2ZB': nextState.linearAcceleration[2],
 
                 # ----------------
                 # next Angular Velocities Body [instantaneous]
@@ -84,17 +74,16 @@ def flightLogger(agent, dataset=None, baseFrequency=10):
                 agent.logger.info(stats)
 
             writer.writerow(records)
-            timeStep += 1
+            timeStep = next(counter)
             yield
 
 
 def main():
-    agent = RLAgent('agent', decisionFrequency=30.0, defaultSpeed=4, defaultAltitude=6, yawRate=60)
+    agent = RLAgent('agent', decisionFrequency=10.0, defaultSpeed=4, defaultAltitude=6, yawRate=60)
 
     agent.defineState(orientation=getOrientation, position=getPosition,
                       angularVelocity=getAngularVelocity, linearVelocity=getVelocity,
-                      linearAcceleration=getLinearAcceleration,
-                      angularAcceleration=getAngularAcceleration)
+                      linearAcceleration=getLinearAcceleration, angularAcceleration=getAngularAcceleration)
 
     agent.setRl(partial(flightLogger, dataset='datasets/' + 'replay.csv'))
     agent.start()

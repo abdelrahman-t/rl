@@ -1,5 +1,8 @@
 from Common import *
 
+# -------------
+# euler quaternion conversions
+# -------------
 
 def toEulerianAngle(q):
     ysqr = q[2] * q[2]
@@ -41,18 +44,22 @@ def eulerToQuaternion(roll, pitch, yaw):
     return Quaternion(quaternion)
 
 
+# -------------
+# inertial, non-inertial frame transformations
+# -------------
+
 def transformToEarthFrame(vector, q):
-    q_ = Quaternion(q)
-    return q_.rotate(vector)
+    _q = Quaternion(q)
+    return _q.rotate(vector)
 
 
 def transformToBodyFrame(vector, q):
-    q_ = Quaternion(q)
-    return q_.inverse.rotate(vector)
+    _q = Quaternion(q)
+    return _q.inverse.rotate(vector)
 
 
-def transformBodyRatesToEarth(rates, euler):
-    roll, pitch, yaw = euler
+def transformBodyRatesToEarth(rates, q):
+    roll, pitch, yaw = toEulerianAngle(q)
     roll_rate_body, pitch_rate_body, yaw_rate_body = rates
 
     roll_rate_earth = roll_rate_body + pitch_rate_body * np.sin(roll) * np.tan(pitch) + yaw_rate_body * np.cos(
@@ -63,8 +70,8 @@ def transformBodyRatesToEarth(rates, euler):
     return np.array([roll_rate_earth, pitch_rate_earth, yaw_rate_earth])
 
 
-def transformEulerRatesToBody(rates, euler):
-    roll, pitch, yaw = euler
+def transformEulerRatesToBody(rates, q):
+    roll, pitch, yaw = toEulerianAngle(q)
     roll_rate_earth, pitch_rate_earth, yaw_rate_earth = rates
 
     roll_rate_body = roll_rate_earth - yaw_rate_earth * np.sin(pitch)
@@ -74,17 +81,9 @@ def transformEulerRatesToBody(rates, euler):
     return np.array([roll_rate_body, pitch_rate_body, yaw_rate_body])
 
 
-def getGravityVector(roll, pitch):
-    x = np.cos(pitch) * np.sin(roll)
-    y = -np.sin(pitch)
-    z = -np.cos(pitch) * np.cos(roll)
-
-    return np.array([x, y, z])
-
-
-def wrapAngleAroundPi(angle):
-    return np.arctan2(np.sin(angle), np.cos(angle))
-
+# -------------
+# get average rates
+# -------------
 
 def getAverage(m1, m0, frequency, wrap=lambda _: _):
     average = list(map(wrap, (m1 - m0)))
@@ -103,13 +102,18 @@ def getAverageAngularAcceleration(angularVelocity1, angularVelocity0, frequency)
     return getAverage(m1=angularVelocity1, m0=angularVelocity0, frequency=frequency)
 
 
-def getAverageAngularVelocity(angularPosition1, angularPosition0, frequency):
-    return getAverage(m1=angularPosition1, m0=angularPosition0, frequency=frequency, wrap=wrapAngleAroundPi)
+def getAverageAngularVelocity(orientation1, orientation0, frequency):
+    return getAverage(m1=orientation1, m0=orientation0, frequency=frequency,
+                      wrap=wrapAngleAroundPi)
 
+
+# -------------
+# integration
+# -------------
 
 def integrate(initial, rate, frequency, wrap=lambda _: _):
-    integral = list(map(wrap, initial + rate / frequency))
-    return np.array(integral)
+    integral = map(wrap, np.array(initial + rate / frequency))
+    return np.array(list(integral))
 
 
 def integrateAngularVelocity(initialAngularVelocity, angularAcceleration, frequency):
@@ -120,33 +124,56 @@ def integrateLinearVelocity(initialLinearVelocity, linearAcceleration, frequency
     return integrate(initial=initialLinearVelocity, rate=linearAcceleration, frequency=frequency)
 
 
-def integratePosition(initialPosition, linearVelocityEarth, frequency):
-    return integrate(initial=initialPosition, rate=linearVelocityEarth, frequency=frequency)
-
-
 def integrateOrientation(initialOrientation, eulerRates, frequency):
     return integrate(initial=initialOrientation, rate=eulerRates, frequency=frequency, wrap=wrapAngleAroundPi)
 
 
-def integrateTrajectoryAccelerationBody(initialPosition, initialOrientation, initialLinearVelocityBody,
-                                        initialBodyRates, linearAccelerationsBody, angularAccelerationsBody,
+def integratePosition(initialPosition, linearVelocityEarth, frequency):
+    return integrate(initial=initialPosition, rate=linearVelocityEarth, frequency=frequency)
+
+
+# -------------
+# preprocessing
+# -------------
+
+def wrapAngleAroundPi(angle):
+    return np.arctan2(np.sin(angle), np.cos(angle))
+
+
+def preprocessAngles(angle):
+    return np.array([np.sin(angle), np.cos(angle)])
+
+
+# -------------
+# integrate trajectory from accelerations
+# -------------
+# position is (x, y, z)
+# orientation is quaternion (w, x, y, z)
+
+# linear velocity is [Vx, Vy, Vz] in body
+# linear acceleration is [Ax, Ay, Az] in body
+
+# angular velocity is [Wx, Wy, Wz]
+# angular acceleration is [ALPHAx, ALPHAy, ALPHAz]
+# -------------
+
+def integrateTrajectoryAccelerationBody(position, orientation,
+                                        linearVelocity, angularVelocity,
+                                        linearAccelerations, angularAccelerations,
                                         frequency):
 
-    for aBody, alphaBody, f in zip(linearAccelerationsBody, angularAccelerationsBody, frequency):
-        eulerRates = transformBodyRatesToEarth(
-            integrateAngularVelocity(initialBodyRates, alphaBody, f), initialOrientation)
+    for a, alpha, f in zip(linearAccelerations, angularAccelerations, frequency):
+        q1 = eulerToQuaternion(*orientation)
+        eulerRates = transformBodyRatesToEarth(integrateAngularVelocity(angularVelocity, alpha, f), q1)
+        linearVelocityEarth = transformToEarthFrame(integrateLinearVelocity(linearVelocity, a, f), q1)
 
-        nextOrientation = integrateOrientation(initialOrientation, eulerRates, f)
+        nextOrientation = integrateOrientation(orientation, eulerRates, f)
+        q2 = eulerToQuaternion(*nextOrientation)
 
-        initialQ, nextQ = eulerToQuaternion(*initialOrientation), eulerToQuaternion(*nextOrientation)
+        linearVelocity = transformToBodyFrame(linearVelocityEarth, q2)
+        angularVelocity = transformEulerRatesToBody(eulerRates, q2)
 
-        linearVelocityEarth = transformToEarthFrame(integrateLinearVelocity(initialLinearVelocityBody, aBody, f),
-                                                    initialQ)
+        position = integratePosition(position, linearVelocityEarth, f)
+        orientation = nextOrientation
 
-        initialLinearVelocityBody = transformToBodyFrame(linearVelocityEarth, nextQ)
-        initialBodyRates = transformEulerRatesToBody(eulerRates, nextOrientation)
-
-        initialPosition = integratePosition(initialPosition, linearVelocityEarth, f)
-        initialOrientation = nextOrientation
-
-        yield initialPosition, initialOrientation, initialLinearVelocityBody, initialBodyRates
+        yield orientation, position

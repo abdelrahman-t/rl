@@ -12,9 +12,6 @@ def isVirtualAgent(method):
         actions = ['moveForward', 'yawCW', 'yawCCW', 'hover']
         self.actions = {a: lambda: None for a in actions}
 
-    def initializeState(self):
-        pass
-
     def isTerminal(self):
         return self.timeStep >= self.maxDepth
 
@@ -24,8 +21,7 @@ def isVirtualAgent(method):
     def doNothing(*args, **kwargs):
         pass
 
-    methods = {'initialize': initialize, 'initializeState': initializeState, 'isTerminal': isTerminal,
-               'updateState': updateState}
+    methods = {'initialize': initialize, 'isTerminal': isTerminal, 'updateState': updateState}
 
     f1, f2 = method, methods.get(methodName, doNothing)
 
@@ -171,9 +167,7 @@ class RLAgent(threading.Thread):
 
     def yaw(self, rate):
         # temporary hack for performance
-        velocityEarth = self.getState().linearVelocity
-        self.performAction(
-            partial(self.actions['hover'], vx=velocityEarth[0], vy=velocityEarth[1], yawMode=YawMode(True, rate)))
+        self.performAction(partial(self.actions['hover'], vx=0.0, vy=0.0, yawMode=YawMode(True, rate)))
 
     def setRl(self, callback):
         # set rl function = client callback
@@ -191,7 +185,7 @@ class RLAgent(threading.Thread):
     def reset(self):
         self.logger.info("Resetting")
         # resetting environment , the old way. make sure simulator window is active!
-        self.shell.SendKeys('\b')
+        #self.shell.SendKeys('\b')
 
     def run(self, error=0):
         self.initialize()
