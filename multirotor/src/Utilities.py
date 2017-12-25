@@ -37,12 +37,12 @@ def truncateFloat(number, decimalPlaces):
     return ('{0:.%sf}' % decimalPlaces).format(number)
 
 
-def getAverageRatesBody(df, limit, frequency):
+def getAverageRatesBody(df, limit, frequency, rotate=True):
     shape = (limit, 3)
     linearVelocities, linearAccelerations = np.zeros(shape), np.zeros(shape)
     angularVelocities, angularAccelerations = np.zeros(shape), np.zeros(shape)
 
-    # get average linear velocity (EARTH)
+    # get average velocity (EARTH)
     for i in range(1, limit):
         linearVelocities[i] = getAverageLinearVelocity(df.loc[i, ['x', 'y', 'z']].values,
                                                        df.loc[i - 1, ['x', 'y', 'z']].values,
@@ -58,37 +58,55 @@ def getAverageRatesBody(df, limit, frequency):
 
         angularAccelerations[i] = \
             getAverageAngularAcceleration(angularVelocities[i + 1], angularVelocities[i], frequency)
+    
+    if rotate:
+        for i in range(1, limit):
+            q = df.loc[i, ['scalar', 'i', 'j', 'k']].values
 
-    # transform rates to be in BODY FRAME
-    for i in range(1, limit):
-        q = df.loc[i, ['scalar', 'i', 'j', 'k']].values
-
-        linearVelocities[i] = transformToBodyFrame(linearVelocities[i], q)
-        linearAccelerations[i] = transformToBodyFrame(linearAccelerations[i], q)
-
-        angularVelocities[i] = transformEulerRatesToBody(angularVelocities[i], q)
-        angularAccelerations[i] = transformEulerRatesToBody(angularAccelerations[i], q)
+            # transform linear velocity to be in (BODY FRAME)
+            linearVelocities[i] = transformToBodyFrame(linearVelocities[i], q)
+            # transform linear acceleration to be in (BODY FRAME)
+            linearAccelerations[i] = transformToBodyFrame(linearAccelerations[i], q)
+            
+            # transform angular velocity to be in (BODY FRAME)
+            angularVelocities[i] = transformEulerRatesToBody(angularVelocities[i], q)
+            # transform angular acceleration to be in (BODY FRAME)
+            angularAccelerations[i] = transformEulerRatesToBody(angularAccelerations[i], q)
+            
+            
+            # ASSERT TRANSFORMATIONS ARE CORRECT!!
+            t1 = integrateLinearVelocity(linearVelocities[i], linearAccelerations[i], frequency)
+            t2 = integrateAngularVelocity(angularVelocities[i], angularAccelerations[i], frequency)
+            
+            if i+1 < limit:
+                assert np.allclose(linearVelocities[i+1], transformToEarthFrame(t1, q))
+                assert np.allclose(angularVelocities[i+1], transformBodyRatesToEarth(t2, q))
 
     return linearVelocities[1:], angularVelocities[1:], linearAccelerations[1:], angularAccelerations[1:]
 
 
-def getXyAccelerationModel(df, frequency, limit=500):
-    v, w, a, alpha = getAverageRatesBody(df, limit, frequency=frequency)
+def getXyAccelerationModel(df, frequency, rotate, limit=500):
+    v, w, a, alpha = getAverageRatesBody(df, limit, frequency=frequency, rotate=rotate)
+    limit = limit - 2
+    
     X, y = np.zeros((limit, 12)), np.zeros((limit, 6))
-
+    xFrames = np.zeros((limit, 4))
+    
     actionNames = ['moveForward', 'yawCCW', 'yawCW', 'hover']
-    for i, j, k in zip(range(limit - 2), range(1, limit - 2), range(2, limit - 2)):
+    for i, j, k in zip(range(limit), range(1, limit), range(2, limit)):
         roll, pitch = df.loc[j, ['roll', 'pitch']].values
         selectedAction = [0 if a != df.loc[k, 'aName'] else 1 for a in actionNames]
 
         X[i] = np.concatenate((v[i], w[i], [roll, pitch], selectedAction))
         y[i] = np.concatenate((a[i], alpha[i]))
+        
+        xFrames[i] = df.loc[j, ['scalar', 'i', 'j', 'k']].values
 
-    xColumns = ['dXB', 'dYB', 'dZB', 'dRoll', 'dPitch', 'dYaw', 'sin(roll)', 'cos(roll)', 'sin(pitch)', 'cos(pitch)']\
+    xColumns = ['dXB', 'dYB', 'dZB', 'dRoll', 'dPitch', 'dYaw', 'roll', 'pitch']\
              + [i for i in actionNames]
         
     yColumns = ['d2XB', 'd2YB', 'd2ZB', 'd2Roll', 'd2Pitch', 'd2Yaw']
-    return pd.DataFrame(X, columns=xColumns), pd.DataFrame(y, columns=yColumns)
+    return pd.DataFrame(X[:-10], columns=xColumns), pd.DataFrame(y[:-10], columns=yColumns), xFrames
 
 
 class StateT:
