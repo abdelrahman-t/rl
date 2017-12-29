@@ -1,5 +1,6 @@
 from Common import *
 
+
 # -------------
 # euler quaternion conversions
 # -------------
@@ -109,10 +110,16 @@ def integrate(initial, rate, frequency, wrap=lambda _: _):
     return np.array(list(integral))
 
 
+def getAxisAngle(vector):
+    x, y, z = vector
+    magnitude = (x ** 2 + y ** 2 + z ** 2) ** 0.5
+    return vector / magnitude, magnitude
+
+
 def integrateOrientation(q1, angularVelocity, frequency):
     q2 = Quaternion(q1)
     q2.integrate(angularVelocity, 1 / frequency)
-    
+
     return q2
 
 
@@ -149,14 +156,13 @@ def integrateTrajectoryVelocityBody(position, orientation, linearVelocities, ang
     for v, w, f in zip(linearVelocities, angularVelocities, frequency):
         eulerRates = transformBodyRatesToEarth(w, orientation)
         linearVelocityEarth = transformToEarthFrame(v, orientation)
-        
+
         newOrientation = integrateOrientation(orientation, eulerRates, f)
-        position = integratePosition(position, linearVelocityEarth ,f)
-        
+        position = integratePosition(position, linearVelocityEarth, f)
+
         yield (newOrientation,
                position,
                transformToBodyFrame(linearVelocityEarth, newOrientation),
                transformEulerRatesToBody(eulerRates, newOrientation))
-        
+
         orientation = newOrientation
-        

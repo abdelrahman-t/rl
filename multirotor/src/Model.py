@@ -9,25 +9,44 @@ class AccelerationModel:
         self.actionNames = ['moveForward', 'yawCCW', 'yawCW', 'hover']
 
     def initialize(self, initialState):
-        orientation = initialState.orientation
-        euler = toEulerianAngle(orientation)
-        linearVelocity = transformToBodyFrame(initialState.linearVelocity, initialState.orientation)
-
-        return StateT(update=False, position=initialState.position, orientation=euler,
-                      linearVelocityBody=linearVelocity, bodyRates=initialState.angularVelocity)
+        pass
 
     def updateState(self, state, action):
-        selectedAction = [0 if action != a else 1 for a in self.actionNames]
-        roll, pitch = state.orientation[0], state.orientation[1]
+        pass
 
-        x = np.concatenate((state.linearVelocityBody, state.bodyRates, [roll, pitch], selectedAction))
-        y = self.model.predict(x.reshape(1, -1))[0]
 
-        gen = integrateTrajectoryAccelerationBody(state.position, state.orientation,
-                                                  state.linearVelocityBody, state.bodyRates,
-                                                  [y[[0, 1, 2]]], [y[[3, 4, 5]]], [self.frequency])
+class VelocityModel:
+    def __init__(self, regressionModel, frequency):
+        self.model = regressionModel
+        self.frequency = frequency
 
-        position, orientation, linearVelocityBody, bodyRates = next(gen)
+        self.actionNames = ['moveForward', 'yawCCW', 'yawCW', 'hover']
 
-        return StateT(update=False, position=position, orientation=orientation, linearVelocityBody=linearVelocityBody,
-                      bodyRates=bodyRates)
+    def initialize(self, initialState):
+        orientation = Quaternion(eulerToQuaternion(0, 0, 0))
+        linearVelocity = np.array([0, 0, 0])
+        angularVelocity = np.array([0, 0, 0])
+        position = np.array([0.0, 0.0, 0.0])
+        frequency = self.frequency
+
+        return StateT(update=False, position=position, orientation=orientation,
+                      linearVelocity=linearVelocity, angularVelocity=angularVelocity)
+
+    def updateState(self, state, action):
+        selectedAction = np.array([0 if action != a else 1 for a in self.actionNames])
+        position, orientation, frequency = state.position, state.orientation, self.frequency
+        linearVelocity, angularVelocity = state.linearVelocity, state.angularVelocity
+
+        roll, pitch, yaw = toEulerianAngle(orientation)
+
+        s0 = np.concatenate((linearVelocity, angularVelocity, [roll, pitch], selectedAction))
+        s1 = self.model.predict(s0.reshape(1, -1)).reshape(6, )
+
+        orientation, position, linearVelocity, angularVelocity = \
+            next(integrateTrajectoryVelocityBody(position=position, orientation=orientation,
+                                                 frequency=[frequency],
+                                                 linearVelocities=[s1[[0, 1, 2]]],
+                                                 angularVelocities=[s1[[3, 4, 5]]]))
+
+        return StateT(update=False, position=position, orientation=orientation,
+                      linearVelocity=linearVelocity, angularVelocity=angularVelocity)
