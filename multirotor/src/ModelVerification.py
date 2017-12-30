@@ -32,7 +32,7 @@ def draw_multirotor(state):
 
 def main():
     model = VelocityModel(regressionModel=joblib.load('models/gradient.model'), frequency=10.0)
-    agent = RLAgent('agent', decisionFrequency=10.0, defaultSpeed=4, defaultAltitude=6, yawRate=60,
+    agent = RLAgent('agent', decisionFrequency=20.0, defaultSpeed=4, defaultAltitude=6, yawRate=60,
                     alternativeModel=model, maxDepth=math.inf, initialState=None)
 
     agent.setRl(verifyModel)
