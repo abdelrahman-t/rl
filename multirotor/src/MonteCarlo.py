@@ -13,7 +13,6 @@ def reward(agent):
     if agent.isTerminal():
         r = terminalStateReward[0] if isGoal(agent=agent) else terminalStateReward[1]
     else:
-        # −(αx(x − x∗) **2 + αy(y − y∗) **2)
         r = -(wPositionX * (s1.position[0] - g.position[0]) ** 2 + (wPositionY * (s1.position[1] - g.position[1]) ** 2))
 
     return r

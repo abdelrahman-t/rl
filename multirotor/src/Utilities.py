@@ -37,76 +37,57 @@ def truncateFloat(number, decimalPlaces):
     return ('{0:.%sf}' % decimalPlaces).format(number)
 
 
-def getAverageRatesBody(df, limit, frequency, rotate=True):
+def getAverageRatesBody(df, limit, frequency):
     shape = (limit, 3)
-    linearVelocities, linearAccelerations = np.zeros(shape), np.zeros(shape)
-    angularVelocities, angularAccelerations = np.zeros(shape), np.zeros(shape)
+    linearVelocities,  angularVelocities = np.zeros(shape), np.zeros(shape)
 
-    # get average velocity (EARTH)
+    # get average linear and angular velocities (EARTH)
     for i in range(1, limit):
-        linearVelocities[i] = getAverageLinearVelocity(df.loc[i, ['x', 'y', 'z']].values,
-                                                       df.loc[i - 1, ['x', 'y', 'z']].values,
-                                                       frequency)
-
-        angularVelocities[i] = getAverageAngularVelocity(df.loc[i, ['roll', 'pitch', 'yaw']].values,
-                                                         df.loc[i - 1, ['roll', 'pitch', 'yaw']].values,
-                                                         frequency)
-    # get average acceleration (EARTH)
-    for i in range(1, limit - 1):
-        linearAccelerations[i] = \
-            getAverageLinearAcceleration(linearVelocities[i + 1], linearVelocities[i], frequency)
-
-        angularAccelerations[i] = \
-            getAverageAngularAcceleration(angularVelocities[i + 1], angularVelocities[i], frequency)
-    
-    if rotate:
-        for i in range(1, limit):
-            q = df.loc[i, ['scalar', 'i', 'j', 'k']].values
-
-            # transform linear velocity to be in (BODY FRAME)
-            linearVelocities[i] = transformToBodyFrame(linearVelocities[i], q)
-            # transform linear acceleration to be in (BODY FRAME)
-            linearAccelerations[i] = transformToBodyFrame(linearAccelerations[i], q)
-            
-            # transform angular velocity to be in (BODY FRAME)
-            angularVelocities[i] = transformEulerRatesToBody(angularVelocities[i], q)
-            # transform angular acceleration to be in (BODY FRAME)
-            angularAccelerations[i] = transformEulerRatesToBody(angularAccelerations[i], q)
-            
-            
-            # ASSERT TRANSFORMATIONS ARE CORRECT!!
-            t1 = integrateLinearVelocity(linearVelocities[i], linearAccelerations[i], frequency)
-            t2 = integrateAngularVelocity(angularVelocities[i], angularAccelerations[i], frequency)
-            
-            if i+1 < limit:
-                assert np.allclose(linearVelocities[i+1], transformToEarthFrame(t1, q))
-                assert np.allclose(angularVelocities[i+1], transformBodyRatesToEarth(t2, q))
-
-    return linearVelocities[1:], angularVelocities[1:], linearAccelerations[1:], angularAccelerations[1:]
-
-
-def getXyAccelerationModel(df, frequency, rotate, limit=500):
-    v, w, a, alpha = getAverageRatesBody(df, limit, frequency=frequency, rotate=rotate)
-    limit = limit - 2
-    
-    X, y = np.zeros((limit, 12)), np.zeros((limit, 6))
-    xFrames = np.zeros((limit, 4))
-    
-    actionNames = ['moveForward', 'yawCCW', 'yawCW', 'hover']
-    for i, j, k in zip(range(limit), range(1, limit), range(2, limit)):
-        roll, pitch = df.loc[j, ['roll', 'pitch']].values
-        selectedAction = [0 if a != df.loc[k, 'aName'] else 1 for a in actionNames]
-
-        X[i] = np.concatenate((v[i], w[i], [roll, pitch], selectedAction))
-        y[i] = np.concatenate((a[i], alpha[i]))
+        p1 = df.loc[i-1, ['x', 'y', 'z']].values.astype(np.float64)
+        p2 = df.loc[i, ['x', 'y', 'z']].values.astype(np.float64)
         
-        xFrames[i] = df.loc[j, ['scalar', 'i', 'j', 'k']].values
+        q1 = Quaternion(df.loc[i-1, ['scalar', 'i', 'j', 'k']].values)
+        q2 = Quaternion(df.loc[i, ['scalar', 'i', 'j', 'k']].values)
+        
+        v = getAverageLinearVelocity(p2, p1, frequency)
+        linearVelocities[i] = v
+        
+        axis, angle = getAverageAngularVelocity(q2, q1, frequency)
+        angularVelocities[i] = axis * angle
+        
+        # sanity check
+        #print(np.rad2deg(toEulerianAngle(integrateOrientation(q1, axis*angle, frequency))), np.rad2deg(toEulerianAngle(q2)))
+        #assert integrateOrientation(q1, axis*angle, frequency) == q2
+        #assert np.allclose(integratePosition(p1, v, frequency), p2)
+        
+    return linearVelocities, angularVelocities
+
+
+def getXyVelocityModel(df, frequency, limit=500):
+    v, w, = getAverageRatesBody(df, limit, frequency=frequency)
+    
+    input_shape = (limit, 12)
+    output_shape = (limit, 6)
+    
+    X, y = np.zeros(input_shape), np.zeros(output_shape)
+    actionNames = ['moveForward', 'yawCCW', 'yawCW', 'hover']
+    
+    limit = limit - 2
+    for t0, t1 in zip(range(limit), range(1, limit)):
+        selectedAction = [0 if a != df.loc[t1, 'aName'] else 1 for a in actionNames]
+        
+        q = Quaternion(df.loc[t0, ['scalar', 'i', 'j', 'k']].values)
+        roll, pitch, yaw = toEulerianAngle(q)
+        
+        X[t0] = np.concatenate((transformToBodyFrame(v[t0], q), transformEulerRatesToBody(w[t0], q), [roll, pitch], selectedAction))
+        y[t0] = np.concatenate((transformToBodyFrame(v[t1], q), transformEulerRatesToBody(w[t1], q)))
 
     xColumns = ['dXB', 'dYB', 'dZB', 'dRoll', 'dPitch', 'dYaw', 'roll', 'pitch']\
              + [i for i in actionNames]
         
-    yColumns = ['d2XB', 'd2YB', 'd2ZB', 'd2Roll', 'd2Pitch', 'd2Yaw']
-    return pd.DataFrame(X[:-10], columns=xColumns), pd.DataFrame(y[:-10], columns=yColumns), xFrames
+    yColumns = ['dXB', 'dYB', 'dZB', 'dRoll', 'dPitch', 'dYaw']
+    
+    return pd.DataFrame(X[:-5], columns=xColumns), pd.DataFrame(y[:-5], columns=yColumns)
 
 
 class StateT:

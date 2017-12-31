@@ -1,4 +1,5 @@
-﻿from RLAgent import *
+﻿from Common import *
+from RLAgent import *
 from Utilities import *
 
 
@@ -48,7 +49,7 @@ def flightLogger(agent, dataset=None, baseFrequency=10):
                 'dZB': nextState.linearVelocity[2],
 
                 # -----------------
-                # next Linear Accelerations in Earth [Instantaneous]
+                # next Linear Accelerations in Body [Instantaneous]
                 'd2XB': nextState.linearAcceleration[0], 'd2YB': nextState.linearAcceleration[1],
                 'd2ZB': nextState.linearAcceleration[2],
 
