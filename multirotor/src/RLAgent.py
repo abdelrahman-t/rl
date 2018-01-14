@@ -60,11 +60,11 @@ class RLAgent(threading.Thread):
         self.isTerminalConditions = [isGoal, getCollisionInfo]
 
         self.keyMap, self.keyPressed = None, KeyT()
-        self.keyboardListener = keyboard.Listener(on_press=partial(onPress, token=self.keyPressed),
-                                                  on_release=partial(onRelease, token=self.keyPressed))
-        self.keyboardListener.start()
+        #self.keyboardListener = keyboard.Listener(on_press=partial(onPress, token=self.keyPressed),
+        #                                          on_release=partial(onRelease, token=self.keyPressed))
+        #self.keyboardListener.start()
 
-        self.alternativeModel, self.initialState, self.maxDepth, self.timeStep =\
+        self.alternativeModel, self.initialState, self.maxDepth, self.timeStep = \
             alternativeModel, initialState, maxDepth, 0
 
         self.reward = self.rl = lambda: 0
@@ -185,15 +185,15 @@ class RLAgent(threading.Thread):
     def reset(self):
         self.logger.info("Resetting")
         # resetting environment , the old way. make sure simulator window is active!
-        #self.shell.SendKeys('\b')
+        # self.shell.SendKeys('\b')
 
     def run(self, error=0):
         self.initialize()
         callback = self.rl()
 
         self.timeStep, period = 0, 1 / self.decisionFrequency
-        stateKeys = self.getState().getKeys()
 
+        result = None
         while not self.isTerminal():
             self.timeStep += 1
             start = time.time()
@@ -209,22 +209,13 @@ class RLAgent(threading.Thread):
                 continue
 
             self.updateState()
-
             s, r, isTerminal = self.getState(), self.reward(), self.isTerminal()
 
             # send agent the the transition reward, new state and isTerminal and wait until the agent yields (OK signal)
             next(callback)
-            callback.send((r, s, isTerminal))
+            result = callback.send((r, s, isTerminal))
 
-            # if self.timeStep % self.decisionFrequency == 0:
-            #     self.logger.debug((['{}={}'.format(key, getattr(s, key)) for key in stateKeys], isTerminal))
-
-        # disarm agent
-        # self.performAction(partial(self.client.armDisarm, False))
-        # reset environment
-        # self.reset()
-        # get agent into initial state
-        # self.initializeState()
+        return result
 
     def saveProgress(self, progress, fileName, append=False):
         try:

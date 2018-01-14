@@ -54,12 +54,7 @@ def getAverageRatesBody(df, limit, frequency):
         
         axis, angle = getAverageAngularVelocity(q2, q1, frequency)
         angularVelocities[i] = axis * angle
-        
-        # sanity check
-        #print(np.rad2deg(toEulerianAngle(integrateOrientation(q1, axis*angle, frequency))), np.rad2deg(toEulerianAngle(q2)))
-        #assert integrateOrientation(q1, axis*angle, frequency) == q2
-        #assert np.allclose(integratePosition(p1, v, frequency), p2)
-        
+
     return linearVelocities, angularVelocities
 
 
@@ -79,8 +74,12 @@ def getXyVelocityModel(df, frequency, limit=500):
         q = Quaternion(df.loc[t0, ['scalar', 'i', 'j', 'k']].values)
         roll, pitch, yaw = toEulerianAngle(q)
         
-        X[t0] = np.concatenate((transformToBodyFrame(v[t0], q), transformEulerRatesToBody(w[t0], q), [roll, pitch], selectedAction))
-        y[t0] = np.concatenate((transformToBodyFrame(v[t1], q), transformEulerRatesToBody(w[t1], q)))
+        X[t0] = np.concatenate((transformToBodyFrame(v[t0], q),
+                                transformEulerRatesToBody(w[t0], q),
+                                [roll, pitch], selectedAction))
+
+        y[t0] = np.concatenate((transformToBodyFrame(v[t1], q),
+                                transformEulerRatesToBody(w[t1], q)))
 
     xColumns = ['dXB', 'dYB', 'dZB', 'dRoll', 'dPitch', 'dYaw', 'roll', 'pitch']\
              + [i for i in actionNames]
@@ -128,6 +127,7 @@ class StateT:
                 i += 1
             except Exception as e:  # sanity check
                 agent.logger.critical(key + " " + str(e))
+                return
 
         # signal garbage collector
         temp.prevState.prevState = None

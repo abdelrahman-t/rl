@@ -1,21 +1,31 @@
 from __future__ import print_function
-import msgpackrpc  # pip install msgpack-rpc-python
+import msgpackrpc  # install as admin: pip install msgpack-rpc-python
 import numpy as np  # pip install numpy
 import msgpack
 import math
 import time
 import sys
 import os
+import inspect
+import types
+import re
 
 
 class MsgpackMixin:
+    def __repr__(self):
+        from pprint import pformat
+        return "<" + type(self).__name__ + "> " + pformat(vars(self), indent=4, width=1)
+
     def to_msgpack(self, *args, **kwargs):
-        return self.__dict__  # msgpack.dump(self.to_dict(*args, **kwargs))
+        return self.__dict__
 
     @classmethod
     def from_msgpack(cls, encoded):
         obj = cls()
-        obj.__dict__ = {k.decode('utf-8'): v for k, v in encoded.items()}
+        # obj.__dict__ = {k.decode('utf-8'): (from_msgpack(v.__class__, v) if hasattr(v, "__dict__") else v) for k, v in encoded.items()}
+        obj.__dict__ = {k: (v if not isinstance(v, dict) else getattr(getattr(obj, k).__class__, "from_msgpack")(v)) for
+                        k, v in encoded.items()}
+        # return cls(**msgpack.unpack(encoded))
         return obj
 
 
@@ -59,7 +69,7 @@ class Quaternionr(MsgpackMixin):
     y_val = np.float32(0)
     z_val = np.float32(0)
 
-    def __init__(self, x_val=np.float32(0), y_val=np.float32(0), z_val=np.float32(0), w_val=np.float32(0)):
+    def __init__(self, x_val=np.float32(0), y_val=np.float32(0), z_val=np.float32(0), w_val=np.float32(1)):
         self.x_val = x_val
         self.y_val = y_val
         self.z_val = z_val
@@ -69,6 +79,15 @@ class Quaternionr(MsgpackMixin):
         return np.array([self.w_val, self.x_val, self.y_val, self.z_val])
 
 
+class Pose(MsgpackMixin):
+    position = Vector3r()
+    orientation = Quaternionr()
+
+    def __init__(self, position_val=Vector3r(), orientation_val=Quaternionr()):
+        self.position = position_val
+        self.orientation = orientation_val
+
+
 class CollisionInfo(MsgpackMixin):
     has_collided = False
     normal = Vector3r()
@@ -76,6 +95,8 @@ class CollisionInfo(MsgpackMixin):
     position = Vector3r()
     penetration_depth = np.float32(0)
     time_stamp = np.float32(0)
+    object_name = ""
+    object_id = -1
 
 
 class GeoPoint(MsgpackMixin):
@@ -127,7 +148,7 @@ class CarControls(MsgpackMixin):
     handbrake = False
     is_manual_gear = False
     manual_gear = 0
-    gear_immediate = False
+    gear_immediate = True
 
     def set_throttle(self, throttle_val, forward):
         if (forward):
@@ -140,26 +161,47 @@ class CarControls(MsgpackMixin):
             throttle = - abs(throttle_val)
 
 
+class KinematicsState(MsgpackMixin):
+    position = Vector3r()
+    orientation = Quaternionr()
+    linear_velocity = Vector3r()
+    angular_velocity = Vector3r()
+    linear_acceleration = Vector3r()
+    angular_acceleration = Vector3r()
+
+
 class CarState(MsgpackMixin):
     speed = np.float32(0)
     gear = 0
-    position = Vector3r()
-    velocity = Vector3r()
-    orientation = Quaternionr()
+    collision = CollisionInfo()
+    kinematics_true = KinematicsState()
+    timestamp = np.uint64(0)
+
+
+class MultirotorState(MsgpackMixin):
+    collision = CollisionInfo()
+    kinematics_estimated = KinematicsState()
+    kinematics_true = KinematicsState()
+    gps_location = GeoPoint()
+    timestamp = np.uint64(0)
 
 
 class AirSimClientBase:
     def __init__(self, ip, port):
-        self.client = msgpackrpc.Client(msgpackrpc.Address(ip, port), timeout=3600)
+        self.client = msgpackrpc.Client(msgpackrpc.Address(ip, port), timeout=3600, pack_encoding='utf-8',
+                                        unpack_encoding='utf-8')
 
     def ping(self):
         return self.client.call('ping')
+
+    def reset(self):
+        self.client.call('reset')
 
     def confirmConnection(self):
         print('Waiting for connection: ', end='')
         home = self.getHomeGeoPoint()
         while ((home.latitude == 0 and home.longitude == 0 and home.altitude == 0) or
-                   math.isnan(home.latitude) or math.isnan(home.longitude) or math.isnan(home.altitude)):
+               math.isnan(home.latitude) or math.isnan(home.longitude) or math.isnan(home.altitude)):
             time.sleep(1)
             home = self.getHomeGeoPoint()
             print('X', end='')
@@ -174,6 +216,19 @@ class AirSimClientBase:
 
     def isApiControlEnabled(self):
         return self.client.call('isApiControlEnabled')
+
+    def simSetSegmentationObjectID(self, mesh_name, object_id, is_name_regex=False):
+        return self.client.call('simSetSegmentationObjectID', mesh_name, object_id, is_name_regex)
+
+    def simGetSegmentationObjectID(self, mesh_name):
+        return self.client.call('simGetSegmentationObjectID', mesh_name)
+
+    def simPrintLogMessage(self, message, message_param="", severity=0):
+        return self.client.call('simPrintLogMessage', message, message_param, severity)
+
+    def simGetObjectPose(self, object_name):
+        pose = self.client.call('simGetObjectPose', object_name)
+        return Pose.from_msgpack(pose)
 
     # camera control
     # simGetImage returns compressed png in array of bytes
@@ -192,6 +247,9 @@ class AirSimClientBase:
         responses_raw = self.client.call('simGetImages', requests)
         return [ImageResponse.from_msgpack(response_raw) for response_raw in responses_raw]
 
+    def getCollisionInfo(self):
+        return CollisionInfo.from_msgpack(self.client.call('getCollisionInfo'))
+
     @staticmethod
     def stringToUint8Array(bstr):
         return np.fromstring(bstr, np.uint8)
@@ -209,12 +267,32 @@ class AirSimClientBase:
         return AirSimClientBase.listTo2DFloatArray(response.image_data_float, response.width, response.height)
 
     @staticmethod
+    def get_public_fields(obj):
+        return [attr for attr in dir(obj)
+                if not (attr.startswith("_")
+                        or inspect.isbuiltin(attr)
+                        or inspect.isfunction(attr)
+                        or inspect.ismethod(attr))]
+
+    @staticmethod
+    def to_dict(obj):
+        return dict([attr, getattr(obj, attr)] for attr in AirSimClientBase.get_public_fields(obj))
+
+    @staticmethod
+    def to_str(obj):
+        return str(AirSimClientBase.to_dict(obj))
+
+    @staticmethod
     def write_file(filename, bstr):
         with open(filename, 'wb') as afile:
             afile.write(bstr)
 
-    def simSetPose(self, position, orientation):
-        return self.client.call('simSetPose', position, orientation)
+    def simSetPose(self, pose, ignore_collison):
+        self.client.call('simSetPose', pose, ignore_collison)
+
+    def simGetPose(self):
+        pose = self.client.call('simGetPose')
+        return Pose.from_msgpack(pose)
 
     # helper method for converting getOrientation to roll/pitch/yaw
     # https:#en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles
@@ -244,7 +322,7 @@ class AirSimClientBase:
         t4 = +1.0 - 2.0 * (ysqr + z * z)
         yaw = math.atan2(t3, t4)
 
-        return np.array([roll, pitch, yaw])
+        return (pitch, roll, yaw)
 
     @staticmethod
     def toQuaternion(pitch, roll, yaw):
@@ -353,9 +431,9 @@ class AirSimClientBase:
         else:
             raise Exception('Image must have H x W x 3, H x W x 1 or H x W dimensions.')
 
-        file.write(bytes('PF\n', 'UTF-8') if color else bytes('Pf\n', 'UTF-8'))
+        file.write('PF\n'.encode('utf-8') if color else 'Pf\n'.encode('utf-8'))
         temp_str = '%d %d\n' % (image.shape[1], image.shape[0])
-        file.write(bytes(temp_str, 'UTF-8'))
+        file.write(temp_str.encode('utf-8'))
 
         endian = image.dtype.byteorder
 
@@ -363,13 +441,42 @@ class AirSimClientBase:
             scale = -scale
 
         temp_str = '%f\n' % scale
-        file.write(bytes(temp_str, 'UTF-8'))
+        file.write(temp_str.encode('utf-8'))
 
         image.tofile(file)
 
+    @staticmethod
+    def write_png(filename, image):
+        """ image must be numpy array H X W X channels
+        """
+        import zlib, struct
+
+        buf = image.flatten().tobytes()
+        width = image.shape[1]
+        height = image.shape[0]
+
+        # reverse the vertical line order and add null bytes at the start
+        width_byte_4 = width * 4
+        raw_data = b''.join(b'\x00' + buf[span:span + width_byte_4]
+                            for span in range((height - 1) * width_byte_4, -1, - width_byte_4))
+
+        def png_pack(png_tag, data):
+            chunk_head = png_tag + data
+            return (struct.pack("!I", len(data)) +
+                    chunk_head +
+                    struct.pack("!I", 0xFFFFFFFF & zlib.crc32(chunk_head)))
+
+        png_bytes = b''.join([
+            b'\x89PNG\r\n\x1a\n',
+            png_pack(b'IHDR', struct.pack("!2I5B", width, height, 8, 6, 0, 0, 0)),
+            png_pack(b'IDAT', zlib.compress(raw_data, 9)),
+            png_pack(b'IEND', b'')])
+
+        AirSimClientBase.write_file(filename, png_bytes)
+
 
 # -----------------------------------  Multirotor APIs ---------------------------------------------
-class MultirotorClient(AirSimClientBase):
+class MultirotorClient(AirSimClientBase, object):
     def __init__(self, ip=""):
         if (ip == ""):
             ip = "127.0.0.1"
@@ -391,20 +498,14 @@ class MultirotorClient(AirSimClientBase):
         return self.client.call('hover')
 
     # query vehicle state
+    def getMultirotorState(self) -> MultirotorState:
+        return MultirotorState.from_msgpack(self.client.call('getMultirotorState'))
+
     def getPosition(self):
         return Vector3r.from_msgpack(self.client.call('getPosition'))
 
     def getVelocity(self):
         return Vector3r.from_msgpack(self.client.call('getVelocity'))
-
-    def getAngularVelocity(self):
-        return Vector3r.from_msgpack(self.client.call('getAngularVelocity'))
-
-    def getAngularAcceleration(self):
-        return Vector3r.from_msgpack(self.client.call('getAngularAcceleration'))
-
-    def getLinearAcceleration(self):
-        return Vector3r.from_msgpack(self.client.call('getLinearAcceleration'))
 
     def getOrientation(self):
         return Quaternionr.from_msgpack(self.client.call('getOrientation'))
@@ -415,14 +516,12 @@ class MultirotorClient(AirSimClientBase):
     def getGpsLocation(self):
         return GeoPoint.from_msgpack(self.client.call('getGpsLocation'))
 
-    def getRollPitchYaw(self):
+    def getPitchRollYaw(self):
         return self.toEulerianAngle(self.getOrientation())
 
-    def getCollisionInfo(self):
-        return CollisionInfo.from_msgpack(self.client.call('getCollisionInfo'))
+    def getAngularVelocity(self):
+        return self.getMultirotorState().kinematics_true.angular_velocity
 
-    # def getRCData(self):
-    #    return self.client.call('getRCData')
     def timestampNow(self):
         return self.client.call('timestampNow')
 
@@ -445,18 +544,32 @@ class MultirotorClient(AirSimClientBase):
     def moveByVelocityZ(self, vx, vy, z, duration, drivetrain=DrivetrainType.MaxDegreeOfFreedom, yaw_mode=YawMode()):
         return self.client.call('moveByVelocityZ', vx, vy, z, duration, drivetrain, yaw_mode)
 
-    def moveOnPath(self, path, velocity, max_wait_seconds=60, drivetrain=DrivetrainType.MaxDegreeOfFreedom, yaw_mode=YawMode(),
-                   lookahead=-1, adaptive_lookahead=1):
-        return self.client.call('moveOnPath', path, velocity, max_wait_seconds, drivetrain, yaw_mode, lookahead, adaptive_lookahead)
+    def moveOnPath(self, path, velocity, max_wait_seconds=60, drivetrain=DrivetrainType.MaxDegreeOfFreedom,
+                   yaw_mode=YawMode(), lookahead=-1, adaptive_lookahead=1):
+        return self.client.call('moveOnPath', path, velocity, max_wait_seconds, drivetrain, yaw_mode, lookahead,
+                                adaptive_lookahead)
 
     def moveToZ(self, z, velocity, max_wait_seconds=60, yaw_mode=YawMode(), lookahead=-1, adaptive_lookahead=1):
         return self.client.call('moveToZ', z, velocity, max_wait_seconds, yaw_mode, lookahead, adaptive_lookahead)
 
-    def moveToPosition(self, x, y, z, velocity, max_wait_seconds=60, drivetrain=DrivetrainType.MaxDegreeOfFreedom, yaw_mode=YawMode(),
-                       lookahead=-1, adaptive_lookahead=1):
-        return self.client.call('moveToPosition', x, y, z, velocity, max_wait_seconds, drivetrain, yaw_mode, lookahead, adaptive_lookahead)
+    def moveToPosition(self, x, y, z, velocity, max_wait_seconds=60, drivetrain=DrivetrainType.MaxDegreeOfFreedom,
+                       yaw_mode=YawMode(), lookahead=-1, adaptive_lookahead=1):
+        return self.client.call('moveToPosition', x, y, z, velocity, max_wait_seconds, drivetrain, yaw_mode, lookahead,
+                                adaptive_lookahead)
 
-    def moveByManual(self, vx_max, vy_max, z_min, duration, drivetrain=DrivetrainType.MaxDegreeOfFreedom, yaw_mode=YawMode()):
+    def moveByManual(self, vx_max, vy_max, z_min, duration, drivetrain=DrivetrainType.MaxDegreeOfFreedom,
+                     yaw_mode=YawMode()):
+        """Read current RC state and use it to control the vehicles. 
+        Parameters sets up the constraints on velocity and minimum altitude while flying. If RC state is detected to violate these constraints
+        then that RC state would be ignored.
+        :param vx_max: max velocity allowed in x direction
+        :param vy_max: max velocity allowed in y direction
+        :param vz_max: max velocity allowed in z direction
+        :param z_min: min z allowed allowed for vehicle position
+        :param duration: after this duration vehicle would switch back to non-manual mode
+        :param drivetrain: when ForwardOnly, vehicle rotates itself so that its front is always facing the direction of travel. If MaxDegreeOfFreedom then it doesn't do that (crab-like movement)
+        :param yaw_mode: Specifies if vehicle should face at given angle (is_rate=False) or should be rotating around its axis at given rate (is_rate=True)
+        """
         return self.client.call('moveByManual', vx_max, vy_max, z_min, duration, drivetrain, yaw_mode)
 
     def rotateToYaw(self, yaw, max_wait_seconds=60, margin=5):
@@ -467,7 +580,7 @@ class MultirotorClient(AirSimClientBase):
 
 
 # -----------------------------------  Car APIs ---------------------------------------------
-class CarClient(AirSimClientBase):
+class CarClient(AirSimClientBase, object):
     def __init__(self, ip=""):
         if (ip == ""):
             ip = "127.0.0.1"
