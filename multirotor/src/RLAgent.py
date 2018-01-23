@@ -7,10 +7,11 @@ from abc import ABCMeta
 def isVirtualAgent(method):
     methodName = method.__name__
 
-    def initialize(self):
-        self.state = self.alternativeModel.initialize(self.initialState)
-        actions = ['moveForward', 'yawCW', 'yawCCW', 'hover']
-        self.actions = {a: lambda: None for a in actions}
+    def initialize(self, initialState=None):
+        if initialState:
+            self.state = self.alternativeModel.initialize(initialState)
+            actions = ['moveForward', 'yawCW', 'yawCCW', 'hover']
+            self.actions = {a: lambda: None for a in actions}
 
     def isTerminal(self):
         return self.timeStep >= self.maxDepth
@@ -25,13 +26,13 @@ def isVirtualAgent(method):
 
     f1, f2 = method, methods.get(methodName, doNothing)
 
-    def selector(*args):
+    def selector(*args, **kwargs):
         self = args[0]
         if self.alternativeModel:
-            return f2(*args)
+            return f2(*args, **kwargs)
 
         else:
-            return f1(*args)
+            return f1(*args, **kwargs)
 
     return selector
 
@@ -39,7 +40,7 @@ def isVirtualAgent(method):
 class RLAgent(threading.Thread):
     __metaclass__ = ABCMeta
 
-    def __init__(self, name, alternativeModel=None, maxDepth=20, initialState=None, serverIpAddress='127.0.0.1',
+    def __init__(self, name, alternativeModel=None, maxDepth=20, serverIpAddress='127.0.0.1',
                  defaultSpeed=3, defaultAltitude=1.5, yawRate=70, decisionFrequency=10, learningRate=0.01, discount=1,
                  crashRecoveryPeriod=16, logFlight=False, logFileName=getDateTime().strip()):
 
@@ -60,17 +61,16 @@ class RLAgent(threading.Thread):
         self.isTerminalConditions = [isGoal, getCollisionInfo]
 
         self.keyMap, self.keyPressed = None, KeyT()
-        #self.keyboardListener = keyboard.Listener(on_press=partial(onPress, token=self.keyPressed),
+        # self.keyboardListener = keyboard.Listener(on_press=partial(onPress, token=self.keyPressed),
         #                                          on_release=partial(onRelease, token=self.keyPressed))
-        #self.keyboardListener.start()
+        # self.keyboardListener.start()
 
-        self.alternativeModel, self.initialState, self.maxDepth, self.timeStep = \
-            alternativeModel, initialState, maxDepth, 0
+        self.alternativeModel, self.maxDepth, self.timeStep = alternativeModel, maxDepth, 0
 
         self.reward = self.rl = lambda: 0
 
     @isVirtualAgent
-    def initialize(self):
+    def initialize(self, *args, **kwargs):
         self.initializeConnection()
 
         self.actions = {'moveForward': self.moveForward, 'yawCW': partial(self.yaw, self.yawRate),
@@ -123,7 +123,7 @@ class RLAgent(threading.Thread):
 
     @isVirtualAgent
     def isTerminal(self):
-        return len([True for i in self.isTerminalConditions if i(agent=self)])
+        return len([True for i in self.isTerminalConditions if i(agent=self)]) != 0
 
     def addTerminal(self, condition):
         self.isTerminalConditions.append(condition)
@@ -173,7 +173,7 @@ class RLAgent(threading.Thread):
         # set rl function = client callback
         f = partial(callback, agent=self)
         # for the code to work rl callback has to return a generator
-        assert isinstance(f(), types.GeneratorType)
+        # assert isinstance(f(), types.GeneratorType)
         self.rl = f
 
     def setReward(self, callback):
@@ -187,14 +187,20 @@ class RLAgent(threading.Thread):
         # resetting environment , the old way. make sure simulator window is active!
         # self.shell.SendKeys('\b')
 
-    def run(self, error=0):
+    def run(self, kwargs=None):
+        error = 0
         self.initialize()
-        callback = self.rl()
+
+        if kwargs:
+            callback = self.rl(**kwargs)
+
+        else:
+            callback = self.rl()
 
         self.timeStep, period = 0, 1 / self.decisionFrequency
 
-        result = None
-        while not self.isTerminal():
+        isTerminal = False
+        while isTerminal is False:
             self.timeStep += 1
             start = time.time()
 
@@ -213,9 +219,11 @@ class RLAgent(threading.Thread):
 
             # send agent the the transition reward, new state and isTerminal and wait until the agent yields (OK signal)
             next(callback)
-            result = callback.send((r, s, isTerminal))
+            callback.send((r, s, isTerminal))
 
-        return result
+            if isTerminal:
+                self.timeStep = 0
+                isTerminal = False
 
     def saveProgress(self, progress, fileName, append=False):
         try:
@@ -239,5 +247,5 @@ class RLAgent(threading.Thread):
 
     # Must be a generator!
     # Old implementation, currently unused
-    def rl(self):
+    def rl(self, **kwargs):
         pass

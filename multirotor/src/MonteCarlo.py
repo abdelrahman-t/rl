@@ -2,92 +2,109 @@
 from Common import *
 from RLAgent import *
 from Model import *
-from itertools import count
-from multiprocess import Pool
 
-def reward(agent):
-    terminalStateReward = (1.0e2, -1.0e2)
-    wPositionX = wPositionY = 1
-    g, s1 = agent.getGoal(), agent.getState()
-
-    if agent.isTerminal():
-        r = terminalStateReward[0] if isGoal(agent=agent) else terminalStateReward[1]
-    else:
-        r = -(wPositionX * (s1.position[0] - g.position[0]) ** 2 +
-             (wPositionY * (s1.position[1] - g.position[1]) ** 2))
-
-    return r
+from multiprocess import Pool, Pipe
 
 
-def monteCarloSearch(agent, actions):
+def monteCarloSearch(agent, pipe, shared):
     q, isTerminal = 0.0, False
-    timestep = count()
+    timestep = 0
+    # print('{} started!!'.format(agent.name))
+    # blocking call
+    state, a = pipe.recv()
+    actions = agent.getActions()
 
-    while not isTerminal:
-        yield actions[next(timestep)]
+    while True:
+        nextActions = actions[np.random.randint(4)]
+        yield nextActions if timestep else a
         r, nextState, isTerminal = (yield)
 
         q += r
 
         if isTerminal:
-            yield (actions[0], q)
-        yield
+            # branch is exhausted, return q
+            pipe.send((a, q))
+            timestep = -1
+
+            # blocking call, wait for next instructions
+            state, a = pipe.recv()
+
+            # reset state to new state
+            agent.initialize(state)
+
+        timestep += 1
+
+        # nothing to yield
+        yield None
 
 
-def getRandomActions(start, actions, depth):
-    sequence = actions[np.random.randint(len(actions), size=depth)]
-    sequence[0] = start
+# has side effects!!
+def setRandomActions(shared, actions, depth):
+    sequence = np.random.randint(len(actions), size=depth - 1)
+    ### removed!
 
-    return sequence
 
+def monteCarlo(agent, maxDepth=50, trials=1, frequency=10, **kwargs):
+    model = VelocityModel(regressionModel=joblib.load('models/gradient-m.model'),
+                          frequency=frequency)
 
-# to do: use multiprocessing instead of threading as GIL renders the threaded approach useless!!
-# thread-safety is not enforced, code is only thread-safe on CPython
-def monteCarlo(agent, maxDepth=3, trials=12, frequency=10):
-    PROCESSES = 4
-    model = VelocityModel(regressionModel=joblib.load('models/gradient-m.model'), frequency=frequency)
     actions = np.array(agent.getActions())
-    initialState, isTerminal = agent.getState(), 0
+    shared = []
+    agents = []
+    pipes = []
+    kwargs = []
 
-    jobs = [None] * len(actions) * trials
-    while bool(isTerminal) is False:
+    for i in range(len(actions) * trials):
+        virtualAgent = RLAgent('virtual agent ({})'.format(i),
+                               alternativeModel=model, decisionFrequency=math.inf, maxDepth=maxDepth)
+
+        virtualAgent.setReward(reward)
+        virtualAgent.goal = agent.getGoal()
+        virtualAgent.goalMargins = agent.getGoalMargins()
+
+        parent, child = Pipe()
+        kwargs.append({'pipe': child, 'shared': shared})
+
+        virtualAgent.setRl(monteCarloSearch)
+        virtualAgent.initialize(agent.getState())
+        agents.append(virtualAgent)
+
+        pipes.append(parent)
+
+    pool = Pool()
+    for index, agent_ in enumerate(agents):
+        pool.imap(agent_.run, [kwargs[index]])
+
+    time.sleep(10)
+    tree = np.repeat(actions, trials)
+
+    print('pool initialized!')
+
+    while True:
+        qs = defaultdict(int)
         initialState = agent.getState()
-        qs = {i: [] for i in actions}
+        # setRandomActions(shared, actions, maxDepth)
 
-        for index, a in enumerate(np.repeat(actions, trials)):
-            virtualAgent, isTerminal = RLAgent('virtual', alternativeModel=model, decisionFrequency=math.inf,
-                                               maxDepth=maxDepth, initialState=initialState), False
-            virtualAgent.setReward(reward)
-            virtualAgent.goal = agent.getGoal()
-            virtualAgent.goalMargins = agent.getGoalMargins()
+        for i, root in enumerate(tree):
+            # send agents starting actions
+            pipes[i].send((initialState, root))
 
-            virtualAgent.setRl(partial(monteCarloSearch,
-                                       actions=getRandomActions(a, actions, maxDepth)))
-            jobs[index] = virtualAgent
-
-        pool = Pool(8)
-        results = [pool.apply_async(job.run) for job in jobs]
-        for result in results:
-            action, score = result.get()
-            qs[action].append(score)
-
-        pool.close()
-        pool.join()
+        for pipe in pipes:
+            a, q = pipe.recv()
+            qs[a] += q
 
         yield actions[np.argmax([np.average(qs[a]) for a in actions])]
         r, nextState, isTerminal = (yield)
 
         f = 1 / (nextState.lastUpdate - initialState.lastUpdate)
-        # correct for deviations from desired freq.
-        model.frequency = f
+        agent.logger.info((f, nextState.goal))
 
-        agent.logger.info(f)
-
+        #model.frequency = f
         yield
 
 
 def main():
-    agent = RLAgent('agent', decisionFrequency=10.0, defaultSpeed=4, defaultAltitude=20, yawRate=70)
+    agent = RLAgent('agent', decisionFrequency=10.0, defaultSpeed=4, defaultAltitude=6, yawRate=70)
 
     # callbacks will be called in the order they were specified, beware of order of execution (if any state parameter is
     #  dependant on another)
@@ -95,12 +112,12 @@ def main():
     # state, state updates are done by the environment in a rate that corresponds to agent decision making freq.
 
     agent.defineState(orientation=getOrientation, angularVelocity=getAngularVelocity,
-                      linearVelocity=getVelocity, position=getPosition)
+                      linearVelocity=getVelocity, position=getPosition, goal=getHorizontalDistanceGoal)
 
     agent.setRl(monteCarlo)
     agent.setReward(reward)
     agent.setGoal(position=np.array([-40, -50, 0]))
-    agent.setGoalMargins(position=np.array([0.5, 0.5, math.inf]))
+    agent.setGoalMargins(position=np.array([2.0, 2.0, math.inf]))
     agent.start()
     agent.join()
 

@@ -51,3 +51,17 @@ def onPress(key, token):
 
 def onRelease(key, token):
     token.clear()
+
+
+def reward(agent):
+    terminalStateReward = (1.0e2, -1.0e2)
+    wPositionX = wPositionY = 1
+    g, s1 = agent.getGoal(), agent.getState()
+
+    if agent.isTerminal():
+        r = terminalStateReward[0] if isGoal(agent=agent) else terminalStateReward[1]
+    else:
+        r = -(wPositionX * (s1.position[0] - g.position[0]) ** 2 +
+              (wPositionY * (s1.position[1] - g.position[1]) ** 2))
+
+    return r
