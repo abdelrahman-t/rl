@@ -9,11 +9,11 @@ from multiprocess import Pool, Pipe
 def monteCarloSearch(agent, pipe, shared):
     q, isTerminal = 0.0, False
     timestep = 0
-    # print('{} started!!'.format(agent.name))
-    # blocking call
+
     state, a = pipe.recv()
     actions = agent.getActions()
 
+    trials = 0
     while True:
         nextActions = actions[np.random.randint(4)]
         yield nextActions if timestep else a
@@ -22,15 +22,23 @@ def monteCarloSearch(agent, pipe, shared):
         q += r
 
         if isTerminal:
-            # branch is exhausted, return q
-            pipe.send((a, q))
-            timestep = -1
+            if trials == 4:
+                # branch is exhausted, return q
+                pipe.send((a, q))
 
-            # blocking call, wait for next instructions
-            state, a = pipe.recv()
+                # blocking call, wait for next instructions
+                state, a = pipe.recv()
 
-            # reset state to new state
-            agent.initialize(state)
+                # reset state to new state
+                agent.initialize(state)
+
+                # reset q value
+                q = 0
+                trials = 0
+                timestep = -1
+
+            else:
+                trials += 1
 
         timestep += 1
 
@@ -44,7 +52,7 @@ def setRandomActions(shared, actions, depth):
     ### removed!
 
 
-def monteCarlo(agent, maxDepth=50, trials=1, frequency=10, **kwargs):
+def monteCarlo(agent, maxDepth=10, trials=1, frequency=10, **kwargs):
     model = VelocityModel(regressionModel=joblib.load('models/gradient-m.model'),
                           frequency=frequency)
 
@@ -99,7 +107,6 @@ def monteCarlo(agent, maxDepth=50, trials=1, frequency=10, **kwargs):
         f = 1 / (nextState.lastUpdate - initialState.lastUpdate)
         agent.logger.info((f, nextState.goal))
 
-        #model.frequency = f
         yield
 
 
@@ -116,7 +123,7 @@ def main():
 
     agent.setRl(monteCarlo)
     agent.setReward(reward)
-    agent.setGoal(position=np.array([-40, -50, 0]))
+    agent.setGoal(position=np.array([-20, -20, 0]))
     agent.setGoalMargins(position=np.array([2.0, 2.0, math.inf]))
     agent.start()
     agent.join()
