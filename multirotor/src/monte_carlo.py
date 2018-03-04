@@ -3,35 +3,44 @@ from vector_math import *
 from sklearn.externals import joblib
 from agent_helpers import *
 
-from mcts import mcts
-from mcts.mcts_utils import GameState
-from mcts.tree_policy import UCB1
-from mcts.backups import monte_carlo
+import mcts
+from mcts_utils import GameState
+from tree_policy import UCB1
+from backups import *
 from typing import List, NewType
+from numpy import ndarray
 
 A = NewType('action', int)
 
 # CONFIG #
-START = numpy.array([4180.0, -1830.0])
-GOAL = (numpy.array([5920.0, -11140.0]) - START) / 100.0
+START = numpy.array([4180.0, -4270.0])
+GOAL = (numpy.array([5920.0, -12560.0]) - START) / 100.0
+
 ACTION = numpy.array([[1., 0., 0., 0.],
                       [0., 1., 0., 0.],
                       [0., 0., 1., 0.],
                       [0., 0., 0., 1.]])
 
 OBSTACLE = (numpy.array([[2620.0, -6210.0],
-                         #[3430.0, -6210.0],
                          [4380.0, -6210.0],
-                         #[5330.0, -6210.0],
-                         [4390.0, -9270],
-                         [5350.0, -9270],
-                         [6270.0, -9270],
-                         [6280.0, -6210.0]]) - START) / 100.0
+                         [6280.0, -6210.0],
 
-MIN_OBS = 9.0
+                         [2630.0, -9490.0],
+                         [4390.0, -9490.0],
+                         [6290.0, -9490.0],
+
+                         [3480.0, -7830.0],
+                         [5240.0, -7830.0],
+                         [7140.0, -7830.0]
+                         ]) - START) / 100.0
+
+MIN_OBS = 5.0
+MIN_GOAL = 10.0
 ACTION_NAMES = ['move_forward', 'yaw_ccw', 'yaw_cw', 'hover']
 
-FREQUENCY = 5
+FREQUENCY = 10.5
+
+
 # CONFIG #
 
 
@@ -41,6 +50,10 @@ def get_horizontal_distance(p1: List[float], p2: List[float]) -> float:
 
 
 class State(GameState[int]):
+    w_o_bins: ndarray = numpy.linspace(start=0.0, stop=numpy.deg2rad(180.0), num=90 + 1)  # 90
+    v_bins: ndarray = numpy.linspace(start=0.0, stop=5.0, num=200 + 1)  # 200
+    p_bins: ndarray = numpy.linspace(start=0.0, stop=200.0, num=1600 + 1)  # 1600
+
     def perform(self, action: A) -> GameState:
         roll, pitch, yaw = to_euler_angles(self.orientation)
         s0 = np.concatenate((self.linear_velocity, self.angular_velocity, [roll, pitch], ACTION[action]))
@@ -51,41 +64,52 @@ class State(GameState[int]):
                                                     linear_velocities=[s1[:3]], angular_velocities=[s1[3:6]],
                                                     frequency=[self.frequency]))
 
+        disc = numpy.array([numpy.digitize(numpy.abs(linear_velocity), State.v_bins),
+                            numpy.digitize(numpy.abs(angular_velocity), State.w_o_bins),
+                            numpy.digitize(numpy.abs(position), State.p_bins),
+                            numpy.digitize(numpy.abs(to_euler_angles(orientation)), State.w_o_bins)])
+
         return State(position=position, orientation=orientation, linear_velocity=linear_velocity,
-                     angular_velocity=angular_velocity, frequency=self.frequency, model=self.model)
+                     angular_velocity=angular_velocity, frequency=self.frequency, model=self.model, disc=disc)
 
-    def reward(self) -> float:
-        r1: float = -(1 * (self.position[0] - GOAL[0]) ** 2 +
-                      (1 * (self.position[1] - GOAL[1]) ** 2))
+    def distance_goal(self) -> float:
+        distance: float = (1 * (self.position[0] - GOAL[0]) ** 2 +
+                           (1 * (self.position[1] - GOAL[1]) ** 2)) ** 0.5
 
-        obs = self.distance_to_obstacle()
-        if self.is_terminal():
-            if obs < MIN_OBS:
-                return -1.0e6
+        return distance
 
-            else:
-                return 1.0e6
+    def distance_to_obstacle(self):
+        return min([get_horizontal_distance(self.position, o) for o in OBSTACLE])
 
+    def reward(self):
+        dist_obs: float = self.distance_to_obstacle()
+        dist_goal: float = self.distance_goal()
+
+        if dist_goal > MIN_GOAL:
+            return -dist_goal + 50 * numpy.exp(-MIN_OBS / dist_obs)
         else:
-            return r1
+            return 1e3
 
     @property
     def actions(self) -> List[A]:
         return [0, 1, 2, 3]
 
-    def distance_to_obstacle(self):
-        _ = min([get_horizontal_distance(self.position, o) for o in OBSTACLE])
-        return _
-
     def is_terminal(self) -> bool:
-        return self.distance_to_obstacle() < MIN_OBS or get_horizontal_distance(GOAL, self.position) < 5.0
+        return self.distance_to_obstacle() < MIN_OBS or \
+               self.distance_goal() < MIN_GOAL
+
+    def __eq__(self, other):
+        return numpy.array_equal(self.disc, other.disc)
+
+    def __hash__(self):
+        return hash(self.disc.tostring())
 
 
 def rl(agent):
     model = joblib.load('models/nn-m.model')
 
-    m = mcts.MCTSRootParallel(number_of_processes=6, tree_policy=UCB1(3.0), default_policy='random-k', k=20,
-                              backup=monte_carlo, time_limit=1 / FREQUENCY)
+    m = mcts.MCTSRootParallel(number_of_processes=4, tree_policy=UCB1(4.5), default_policy='random-k', k=20,
+                              backup=monte_carlo, time_limit=1 / FREQUENCY, persist_tree=True, refit=True, cache=True)
 
     while True:
         s = agent.state
@@ -93,13 +117,11 @@ def rl(agent):
                      linear_velocity=transform_to_body_frame(s.linear_velocity, s.orientation),
                      angular_velocity=s.angular_velocity, frequency=FREQUENCY, model=model)
 
-        best_action = m.run(state=args)
-
-        yield ACTION_NAMES[best_action]
+        yield ACTION_NAMES[m.run(state=args)]
         r, next_state, is_terminal = (yield)
 
         f = 1 / (next_state.lastUpdate - s.lastUpdate)
-        print((f, get_horizontal_distance(GOAL, next_state.position)))
+        print(f, args.distance_to_obstacle(), args.distance_goal())
 
         yield
 
