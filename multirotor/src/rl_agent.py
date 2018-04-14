@@ -131,6 +131,10 @@ class RLAgent():
     def set_terminal(self, f):
         self._is_terminal = f
 
+    def reset(self):
+        self._client.reset()
+        time.sleep(0.5)
+
     @property
     def key_pressed(self):
         return self._key_pressed
