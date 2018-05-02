@@ -8,7 +8,7 @@ from vector_math import transform_to_earth_frame
 from pynput import keyboard
 
 
-class RLAgent():
+class RLAgent:
     __metaclass__ = ABCMeta
 
     def __init__(self, name, server_ip_address='127.0.0.1', default_speed=3, default_altitude=1.5,
@@ -134,6 +134,11 @@ class RLAgent():
     def reset(self):
         self._client.reset()
         time.sleep(0.5)
+        self.perform_action(partial(self._client.enableApiControl, True))
+        self.perform_action(partial(self._client.armDisarm, True))
+        self.perform_action(self._client.takeoff)
+
+        return self.state
 
     @property
     def key_pressed(self):
@@ -144,7 +149,7 @@ class RLAgent():
         callback = self._rl()
 
         period = 1 / self._decision_frequency
-
+        self.update_state()
         while True:
             start = time.time()
 
@@ -158,7 +163,7 @@ class RLAgent():
                 continue
 
             self.update_state()
-            s, r, is_terminal = self.state, self._reward(), self._is_terminal()
+            s, r, is_terminal = self.state, self._reward(), self._is_terminal(self)
 
             # send agent the the transition reward, new state and isTerminal and wait until the agent yields (OK signal)
             next(callback)
@@ -192,3 +197,15 @@ class RLAgent():
 
     def _is_terminal(self):
         raise NotImplementedError
+
+    @property
+    def decision_frequency(self):
+        return self._decision_frequency
+
+    @property
+    def default_speed(self):
+        return self._default_speed
+
+    @property
+    def logger(self):
+        return self._logger

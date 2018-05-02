@@ -14,7 +14,7 @@ A = NewType('action', int)
 
 # CONFIG #
 START = numpy.array([4180.0, -4270.0])
-GOAL = (numpy.array([5920.0, -12560.0]) - START) / 100.0
+GOAL = (numpy.array([5920.0, -11140.0]) - START) / 100.0
 
 ACTION = numpy.array([[1., 0., 0., 0.],
                       [0., 1., 0., 0.],
@@ -40,7 +40,7 @@ MIN_OBS = 5.0
 MIN_GOAL = 10.0
 ACTION_NAMES = ['move_forward', 'yaw_ccw', 'yaw_cw', 'hover']
 
-FREQUENCY = 11.5
+FREQUENCY = 10.5
 
 # CONFIG #
 model = joblib.load('models/nn-m.model')
@@ -109,24 +109,31 @@ class State(GameState[int]):
 
 
 def rl(agent):
-    m = mcts.MCTSRootParallel(number_of_processes=3, tree_policy=UCB1(c=3.0), default_policy='random-k', k=25,
-                              backup=monte_carlo, time_limit=1 / FREQUENCY, persist_tree=True, refit=2,
+    m = mcts.MCTSRootParallel(number_of_processes=3, tree_policy=UCB1(c=4.5), default_policy='random-k', k=20,
+                              backup=monte_carlo, time_limit=1 / FREQUENCY, persist_tree=False, refit=5,
                               cache=False)
+    is_terminal = False
+    ss = []
 
-    while True:
-        s = agent.state
-        args = State(position=s.position, orientation=s.orientation, euler=to_euler_angles(s.orientation),
-                     linear_velocity=transform_to_body_frame(s.linear_velocity, s.orientation),
-                     angular_velocity=s.angular_velocity, frequency=FREQUENCY, model=model)
+    try:
+        while is_terminal is False:
+            s = agent.state
+            args = State(position=s.position, orientation=s.orientation, euler=to_euler_angles(s.orientation),
+                         linear_velocity=transform_to_body_frame(s.linear_velocity, s.orientation),
+                         angular_velocity=s.angular_velocity, frequency=FREQUENCY, model=model)
 
-        yield ACTION_NAMES[m.run(state=args)]
-        r, next_state, is_terminal = (yield)
+            yield ACTION_NAMES[m.run(state=args)]
+            r, next_state, is_terminal = (yield)
 
-        f = 1 / (next_state.lastUpdate - s.lastUpdate)
-        # print('frequency: {frequency} obs: {obs} goal: {goal}'.format(frequency=f, obs=args.distance_to_obstacle(),
-        #                                                               goal=args.distance_goal()))
+            f = 1 / (next_state.lastUpdate - s.lastUpdate)
+            # print('frequency: {frequency} obs: {obs} goal: {goal}'.format(frequency=f, obs=args.distance_to_obstacle(),
+            #                                                               goal=args.distance_goal()))
+            ss.append(s)
+            yield
 
-        yield
+    except Exception as e:
+        m.save()
+        pickle.dump(ss, open('s', 'wb'))
 
 
 def main():
