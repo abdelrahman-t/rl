@@ -84,6 +84,21 @@ def transform_euler_rates_to_body(rates, q):
     return numpy.array([roll_rate_body, pitch_rate_body, yaw_rate_body])
 
 
+def delta_heading_2d(position, q, vector_earth):
+    x_axis = [1.0, 0.0]
+    vector_body = transform_to_body_frame(vector_earth - position, q)[:2]
+    return numpy.arctan2(numpy.linalg.det(numpy.column_stack((vector_body, x_axis))),
+                         numpy.dot(vector_body, x_axis))
+
+
+def distance(p1, p2):
+    return numpy.linalg.norm(p2 - p1)
+
+
+def unit(vector):
+    return vector / numpy.linalg.norm(vector)
+
+
 # -------------
 # get average rates
 # -------------
