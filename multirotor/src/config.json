@@ -39,11 +39,11 @@
     },
 
     "saver": {
-        "directory": "home/abdu/model",
+        "directory": "progress",
         "seconds": 600
     },
     "summarizer": {
-        "directory": "home/abdu/summary",
+        "directory": "progress_summary",
         "labels": [],
         "seconds": 120
     },

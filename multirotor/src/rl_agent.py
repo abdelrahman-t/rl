@@ -138,6 +138,7 @@ class RLAgent:
         self.perform_action(partial(self._client.armDisarm, True))
         self.perform_action(self._client.takeoff)
 
+        self.update_state()
         return self.state
 
     @property
@@ -209,3 +210,7 @@ class RLAgent:
     @property
     def logger(self):
         return self._logger
+
+    @property
+    def client(self):
+        return self._client

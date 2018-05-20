@@ -1,8 +1,7 @@
 import time
 import json
 from collections import defaultdict
-from functools import partial
-from typing import List, Union, Tuple, NamedTuple
+from typing import Tuple, NamedTuple
 from itertools import groupby
 from operator import itemgetter
 
@@ -23,30 +22,32 @@ from rl.agents.dqn import DQNAgent
 from rl.policy import BoltzmannQPolicy
 from rl.memory import SequentialMemory
 
-from scipy.interpolate import interp1d
-
 Obstacle = NamedTuple('Obstacle', [('position_body', np.ndarray), ('distance', float), ('angle', float)])
 
 # CONFIG #
-START = np.array([4180.0, -4270.0, 0.0])
+# START = np.array([4180.0, -4270.0, 0.0])
+START = np.array([2440.0, -6210.0, 0.0])
 GOAL = (np.array([6290.0, -9490.0, 0.0]) - START) / 100.0
-SAFE = 7.5
+SAFE = 7.6
 DONE = 7.5
 
-OBSTACLES = (np.array([[2620.0, -6210.0, 0.0],
-                       [4380.0, -6210.0, 0.0],
-                       [6280.0, -6210.0, 0.0],
+OBSTACLES = (np.array([  # [2440.0, -6210.0, 0.0],
+    [4380.0, -6210.0, 0.0],
+    [6240.0, -6210.0, 0.0],
 
-                       [2630.0, -9490.0, 0.0],
-                       [4390.0, -9490.0, 0.0],
-                       [6290.0, -9490.0, 0.0],
+    [3190.0, -7830.0, 0.0],
+    [5240.0, -7830.0, 0.0],
+    [7380.0, -7830.0, 0.0],
 
-                       [3480.0, -7830.0, 0.0],
-                       [5240.0, -7830.0, 0.0],
-                       [7140.0, -7830.0, 0.0],
+    [2630.0, -9490.0, 0.0],
+    [4390.0, -9490.0, 0.0],
+    [6290.0, -9490.0, 0.0],
 
-                       [5920.0, -11140.0, 0.0],
-                       ]) - START) / 100.0
+    [5920.0, -11140.0, 0.0],
+]) - START) / 100.0
+
+
+# OBSTACLES += [float('inf'), float('inf'), float('inf')]
 
 
 class Simulator:
@@ -58,8 +59,6 @@ class Simulator:
         self.agent.update_state()
 
         self.period = 1 / self.agent.decision_frequency
-        self.scalar = interp1d([-1.0, 1.0], [-1.0, 0.0], bounds_error=False, fill_value='extrapolate')
-
         self.time_step = 0
         self.last_call = time.time()
         self.bins = np.linspace(-np.pi, np.pi, 9)
@@ -68,25 +67,29 @@ class Simulator:
                             2: self.agent.actions['yaw_cw'], 3: self.agent.actions['yaw_ccw']}
 
     def vectorize_state(self, state: StateT) -> np.ndarray:
-        """state (19, ):
-
+        """state (26, ):
             inertial:
-                linear velocity: in body-fixed frame, meter/second [0-2]
-                angular velocity: in body-fixed frame, radians/second [3-5]
+                position: position of multirotor. [0-2]
+                linear velocity: in body-fixed frame, meter/second [3-5]
+                angular velocity: in body-fixed frame, radians/second [6-8]
 
-                roll: expressed in radians [6]
-                pitch: expressed in radians [7]
+                roll: expressed in radians [9]
+                pitch: expressed in radians [10]
+                yaw: expressed in radians [11]
 
             goal:
-                delta heading: difference between agent's current heading and goal heading. expressed in radians [8].
-                distance to goal: distance from current position to goal position, expressed in meters [9].
+                delta heading: difference between agent's current heading and goal heading. expressed in radians [12].
+                distance to goal: distance from current position to goal position, expressed in meters [13].
+                goal position: goal position [14-16].
 
             obstacles:
-                distance to obstacles: expressed in meters [10-19]
+                distance to obstacles: expressed in meters [17-26]
         """
-        inertial = np.concatenate((transform_to_body_frame(state.linear_velocity, state.orientation),
-                                   state.angular_velocity, to_euler_angles(state.orientation)[:2]))
-        goal = [delta_heading_2d(state.position, state.orientation, GOAL), distance(state.position, GOAL)]
+        inertial = np.concatenate((state.position,
+                                   transform_to_body_frame(state.linear_velocity, state.orientation),
+                                   state.angular_velocity, to_euler_angles(state.orientation)))
+        goal = np.concatenate(
+            ([delta_heading_2d(state.position, state.orientation, GOAL), distance(state.position, GOAL)], GOAL))
         obs = self.obstacles(state)
 
         return np.concatenate((inertial, goal, obs))
@@ -99,8 +102,7 @@ class Simulator:
         num_bins = len(self.bins)
         angle_dist = dict(zip(range(num_bins), [max_radius] * num_bins))
 
-        in_radius = filter(lambda obs: distance(obs, state.position) <= max_radius,  # and
-                           # -np.pi / 2 <= delta_heading_2d(state.position, state.orientation, obs) <= np.pi / 2,
+        in_radius = filter(lambda obs: distance(obs, state.position) <= max_radius,
                            OBSTACLES)
 
         obs_dist_angle = [*map(lambda obs: Obstacle(position_body=obs,
@@ -118,25 +120,22 @@ class Simulator:
 
     def reward(self, state) -> float:
         goal_body = transform_to_body_frame(GOAL - state.position, state.orientation)
-        displacement = np.dot(unit(goal_body),
-                              transform_to_body_frame(state.linear_velocity, state.orientation))
+        unit_displacement = np.dot(unit(goal_body), transform_to_body_frame(state.linear_velocity, state.orientation))
+        distance_obs = min(self.obstacles(state))
 
-        distance_obs = min(map(partial(distance, state.position), OBSTACLES))
+        if distance_obs < SAFE:
+            return -1 * 800.0
 
-        if distance_obs >= SAFE:
-            return self.scalar(displacement / self.agent.default_speed)
-
-        else:
-            return -10.0
+        return np.clip(unit_displacement / self.agent.default_speed, a_min=-1.0, a_max=1.0)
 
     def is_terminal(self, state) -> bool:
-        return self.reward(state) == -10.0
+        return min(self.obstacles(state)) < SAFE or distance(GOAL, state.position) < DONE
 
-    def execute(self, action) -> Tuple[np.ndarray, float, bool]:
+    def execute(self, actions) -> Tuple[np.ndarray, float, bool]:
         start = time.time()
         self.time_step += 1
 
-        self.agent.perform_action(self.actions_map[action])
+        self.agent.perform_action(self.actions_map[actions])
         while time.time() - start < self.period:
             continue
         self.agent.update_state()
@@ -148,17 +147,20 @@ class Simulator:
         state_vector = self.vectorize_state(next_state)
         if self.time_step % self.agent.decision_frequency == 0:
             print('reward: {}, heading error: {}, distance to goal: {}, obstacles'
-                  .format(np.round(r, 2), int(np.rad2deg(state_vector[8])), int(state_vector[9])), state_vector[10:])
+                  .format(np.round(r, 3), int(np.rad2deg(state_vector[12])), int(state_vector[13])), state_vector[17:])
 
-        # format (observation, reward, done)
-        return state_vector, r, terminal
+        # format (observation, reward, done) keras
+        # return state_vector, r, terminal
+
+        # format (observation, done, reward) tensorforce
+        return state_vector, terminal, r
 
     def step(self, actions):
         return self.execute(actions) + ({},)
 
     @property
     def states_dim(self):
-        return dict(shape=(19,), type='float')
+        return dict(shape=(26,), type='float')
 
     @property
     def actions_dim(self):
@@ -180,28 +182,25 @@ def keras_rl_impl():
     model = Sequential()
     model.add(Flatten(input_shape=(1,) + environment.states_dim['shape']))
 
-    model.add(Dense(64))
+    model.add(Dense(128))
     model.add(Activation('relu'))
 
-    model.add(Dense(64))
-    model.add(Activation('relu'))
-
-    model.add(Dense(64))
+    model.add(Dense(128))
     model.add(Activation('relu'))
 
     model.add(Dense(environment.actions_dim['num_actions']))
     model.add(Activation('linear'))
     print(model.summary())
 
-    memory = SequentialMemory(limit=50000, window_length=1)
+    memory = SequentialMemory(limit=9000, window_length=1)
     policy = BoltzmannQPolicy()
 
-    # model.load_weights('dqn_1525215916.541092_weights.h5f')
     dqn = DQNAgent(model=model, nb_actions=environment.actions_dim['num_actions'], memory=memory, nb_steps_warmup=10,
-                   target_model_update=1e-2, policy=policy)
+                   enable_dueling_network=True, dueling_type='avg', target_model_update=1e-2, policy=policy)
 
     dqn.compile(Adam(lr=1e-3), metrics=['mae'])
-    dqn.fit(environment, nb_steps=500000, visualize=True, verbose=2, nb_max_episode_steps=1000)
+    # dqn.load_weights('latest.h5f')
+    dqn.fit(environment, nb_steps=500000, visualize=True, verbose=2, nb_max_episode_steps=1200)
     dqn.save_weights('dqn_{}_weights.h5f'.format(time.time()), overwrite=True)
 
     # Finally, evaluate our algorithm for 5 episodes.
@@ -209,14 +208,13 @@ def keras_rl_impl():
 
 
 def test():
-    scalar = interp1d([-1.0, 1.0], [-1.0, 0.0])
     bins = np.linspace(-np.pi, np.pi, 9)
 
     def reward(state):
         goal_body = transform_to_body_frame(GOAL - state.position, state.orientation)
         displacement = np.dot(goal_body / np.linalg.norm(goal_body),
                               transform_to_body_frame(state.linear_velocity, state.orientation))
-        return scalar(displacement / agent.default_speed)
+        return displacement / agent.default_speed
 
     def obstacles(state) -> np.ndarray:
         max_radius = 15.0
@@ -304,7 +302,7 @@ def tensorforce_impl():
     runner.run(
         timesteps=6000000,
         episodes=1000,
-        max_episode_timesteps=900,
+        max_episode_timesteps=800,
         deterministic=False,
         episode_finished=episode_finished
     )
@@ -318,4 +316,4 @@ def tensorforce_impl():
 
 
 if __name__ == '__main__':
-    keras_rl_impl()
+    tensorforce_impl()
