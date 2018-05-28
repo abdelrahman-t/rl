@@ -64,7 +64,9 @@ class Simulator:
         self.bins = np.linspace(-np.pi, np.pi, 9)
 
         self.actions_map = {0: self.agent.actions['move_forward'], 1: self.agent.actions['hover'],
-                            2: self.agent.actions['yaw_cw'], 3: self.agent.actions['yaw_ccw']}
+                            2: self.agent.actions['yaw_cw'], 3: self.agent.actions['yaw_ccw'],
+                            4: self.agent.actions['move_right'], 5: self.agent.actions['move_left'],
+                            6: self.agent.actions['move_backward']}
 
     def vectorize_state(self, state: StateT) -> np.ndarray:
         """state (26, ):
@@ -82,8 +84,8 @@ class Simulator:
                 distance to goal: distance from current position to goal position, expressed in meters [13].
                 goal position: goal position [14-16].
 
-            obstacles:
-                distance to obstacles: expressed in meters [17-26]
+            obstacles_view:
+                distance to obstacles_view: expressed in meters [17-26]
         """
         inertial = np.concatenate((state.position,
                                    transform_to_body_frame(state.linear_velocity, state.orientation),
@@ -98,7 +100,7 @@ class Simulator:
         return self.vectorize_state(self.agent.reset())
 
     def obstacles(self, state) -> np.ndarray:
-        max_radius = self.agent.default_speed * 5
+        max_radius = self.agent.default_speed * 8
         num_bins = len(self.bins)
         angle_dist = dict(zip(range(num_bins), [max_radius] * num_bins))
 
@@ -121,12 +123,12 @@ class Simulator:
     def reward(self, state) -> float:
         goal_body = transform_to_body_frame(GOAL - state.position, state.orientation)
         unit_displacement = np.dot(unit(goal_body), transform_to_body_frame(state.linear_velocity, state.orientation))
-        distance_obs = min(self.obstacles(state))
 
-        if distance_obs < SAFE:
-            return -1 * 800.0
+        r = -0.1
+        r += np.clip(unit_displacement / self.agent.default_speed, a_min=-1.0, a_max=1.0)
+        r += -900 if min(self.obstacles(state)) < SAFE else 0.0
 
-        return np.clip(unit_displacement / self.agent.default_speed, a_min=-1.0, a_max=1.0)
+        return r
 
     def is_terminal(self, state) -> bool:
         return min(self.obstacles(state)) < SAFE or distance(GOAL, state.position) < DONE
@@ -146,7 +148,7 @@ class Simulator:
 
         state_vector = self.vectorize_state(next_state)
         if self.time_step % self.agent.decision_frequency == 0:
-            print('reward: {}, heading error: {}, distance to goal: {}, obstacles'
+            print('reward: {}, heading error: {}, distance to goal: {}, obstacles_view'
                   .format(np.round(r, 3), int(np.rad2deg(state_vector[12])), int(state_vector[13])), state_vector[17:])
 
         # format (observation, reward, done) keras
@@ -164,7 +166,7 @@ class Simulator:
 
     @property
     def actions_dim(self):
-        return dict(type='int', num_actions=4)
+        return dict(type='int', num_actions=7)
 
     def __str__(self):
         pass

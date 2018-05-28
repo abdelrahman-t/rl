@@ -1,12 +1,14 @@
+
 [
     {
         "type": "dense",
-        "size": 64,
+        "size": 500,
         "activation": "relu"
     },
     {
         "type": "dense",
-        "size": 64,
+        "size": 500,
         "activation": "relu"
     }
 ]
+
