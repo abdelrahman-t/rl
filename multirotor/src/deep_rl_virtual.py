@@ -17,7 +17,6 @@ from sklearn.externals import joblib
 # loading model
 from tensorforce.agents import Agent
 from tensorforce.execution import Runner
-from tensorforce.core.preprocessors import PreprocessorStack, Normalize
 
 from utilities import StateT
 from vector_math import transform_to_body_frame, to_euler_angles, distance, delta_heading_2d, unit, \
@@ -62,7 +61,7 @@ class Simulator:
         return self.generate_random_point(radius=self.environment_size)
 
     def generate_obstacles(self, min_distance: float, number_obstacles: int):
-        obstacles = []
+        obstacles = [np.array([float('inf'), float('inf'), float('inf')])]
         initial_position = np.array([0.0, 0.0, -1.0])
         safe = self.safe_distance + self.default_speed
 
@@ -130,8 +129,7 @@ class Simulator:
 
         # generate obstacles
         # goal must be generated first!
-        # self.obstacles = self.generate_obstacles(min_distance=16.0, number_obstacles=20)
-        self.obstacles = [np.array([float('inf'), float('inf'), float('inf')])]
+        self.obstacles = self.generate_obstacles(min_distance=16.0, number_obstacles=0)
         self.episode += 1
         self.episode_total_reward = 0.0
 
@@ -212,13 +210,7 @@ class Simulator:
         self.episode_total_reward += r
         terminal = self.is_terminal(next_state)
 
-        # display reward, heading error, distance to goal and obstacles view.
-        # if self.time_step % (self.frequency * 100) == 0:
-        #     print('Reward: {r}, Heading error: {h}, Distance to goal: {d}, Obstacles_view: {o}\n'
-        #         .format(r=np.round(r, 3), h=int(np.rad2deg(state_vector[8])), d=int(state_vector[9]), o=state_vector[10:]))
-
         return state_vector, terminal, r
-        # return state_vector, r, terminal
 
     def step(self, actions):
         return self.execute(actions) + ({},)
