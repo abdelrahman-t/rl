@@ -1,17 +1,13 @@
 import json
 import time
-from _operator import itemgetter
+from operator import itemgetter
 from itertools import groupby
-from typing import Tuple, NamedTuple
+from typing import Tuple, NamedTuple, List
 
+import numpy
 import numpy as np
-from keras import Sequential
-from keras.layers import Flatten, Dense, Activation
-from keras.optimizers import Adam
+
 from pyquaternion import Quaternion
-from rl.agents import DQNAgent
-from rl.memory import SequentialMemory
-from rl.policy import BoltzmannQPolicy
 from sklearn.externals import joblib
 
 # loading model
@@ -23,7 +19,7 @@ from vector_math import transform_to_body_frame, to_euler_angles, distance, delt
     integrate_trajectory_velocity_body, euler_to_quaternion
 
 # obstacle type
-Obstacle = NamedTuple('Obstacle', [('position', np.ndarray), ('distance', float), ('angle', float)])
+ObstacleT = NamedTuple('Obstacle', [('position', np.ndarray), ('distance', float), ('angle', float)])
 
 
 class Simulator:
@@ -32,17 +28,30 @@ class Simulator:
                         [0., 0., 1., 0.],
                         [0., 0., 0., 1.]])
 
-    def __init__(self, frequency: float, safe_distance: float, goal_margin: float, default_speed: float, radius: float,
-                 episode_length: int, model, environment_size: float):
+    def __init__(self, safe_distance: float, goal_margin: float, obstacles_view_radius: float, max_episode_length: int, model,
+                 environment_size: float, number_obstacles: int, default_speed: float = 3.0, frequency: float = 10.0):
+        """
+        creates a simulator instance.
+        :param safe_distance: minimum safe distance to obstacles.
+        :param goal_margin: specifies margin within which agent is considered to have reached the goal.
+        :param obstacles_view_radius: specifies max. distance to obstacles to be detected.
+        :param max_episode_length: max episode length.
+        :param model: model of environment.
+        :param environment_size: radius of the environment.
+        :param number_obstacles: number of obstacles to be generated.
+        :param default_speed: multirotor default speed (depends on the given model).
+        :param frequency: model frequency (depends on the given model).
+        """
         self.frequency = frequency
         self.safe_distance = safe_distance
         self.goal_margin = goal_margin
         self.default_speed = default_speed
-        self.radius = radius
+        self.obstacles_view_radius = obstacles_view_radius
         self.model = model
         self.environment_size = environment_size
+        self.number_obstacles = number_obstacles
 
-        self.episode_length = episode_length
+        self.max_episode_length = max_episode_length
 
         self.time_step = 0
         self.bins = np.linspace(-np.pi, np.pi, 9)
@@ -53,14 +62,30 @@ class Simulator:
 
     def generate_random_point(self, radius: float):
         # from https://programming.guide/random-point-within-circle.html
+        """
+        generate random point.
+        :param radius: generate a 3d point in a given radius.
+        :return: returns a 3d point.
+        """
         angle = np.random.rand() * 2 * np.pi
         r = radius * np.random.rand() ** 0.5
         return np.array([r * np.cos(angle), r * np.sin(angle), -1.0])
 
-    def generate_goal(self):
+    def generate_goal(self) -> numpy.ndarray:
+        """
+        generates goal.
+        :return: new goal position np.array([x, y, z]).
+        """
         return self.generate_random_point(radius=self.environment_size)
 
-    def generate_obstacles(self, min_distance: float, number_obstacles: int):
+    def generate_obstacles(self, min_distance: float, number_obstacles: int) -> List[numpy.ndarray]:
+        """
+        generates number_obstacles obstacles that are min_distance apart from each other, obstacles are never at agent
+        starting position.
+        :param min_distance: minimum distance between any two obstacles.
+        :param number_obstacles: number of obstacles to generate.
+        :return:
+        """
         obstacles = [np.array([float('inf'), float('inf'), float('inf')])]
         initial_position = np.array([0.0, 0.0, -1.0])
         safe = self.safe_distance + self.default_speed
@@ -108,9 +133,13 @@ class Simulator:
         return np.concatenate((inertial, goal))
 
     def reset(self) -> np.ndarray:
+        """
+        resets environment to inital state, generates a new goal position, and obstacles if specified in the config.
+        :return:
+        """
         try:
             terminal_state = self.vectorize_state(self.state)
-            print('episode: {ep}, heading: {h}, goal: {d}, rewards: {r}\n'
+            print('episode: {ep} summary: heading error: {h}, distance to goal: {d}, total reward: {r}\n'
                   .format(h=int(np.rad2deg(terminal_state[12])), d=int(terminal_state[13]),
                           r=int(self.episode_total_reward), ep=self.episode))
 
@@ -122,14 +151,17 @@ class Simulator:
                                position=[0.0, 0.0, -1.0], linear_velocity=[0.0, 0.0, 0.0], angular_velocity=[0.0, 0.0, 0.0])
 
         # update current state
-        self.update_state(initial_state)
+        self._update_state(initial_state)
 
         # generate goal
         self.goal = self.generate_goal()
 
         # generate obstacles
         # goal must be generated first!
-        self.obstacles = self.generate_obstacles(min_distance=16.0, number_obstacles=0)
+        self.obstacles = self.generate_obstacles(min_distance=16.0, number_obstacles=self.number_obstacles)
+
+        # increment episode
+        # reset total reward for the new episode
         self.episode += 1
         self.episode_total_reward = 0.0
 
@@ -140,15 +172,15 @@ class Simulator:
         :return array of distances for nearest obstacles in view for each of the sensors.
         """
         num_bins = len(self.bins)
-        angle_dist = dict(zip(range(num_bins), [self.radius] * num_bins))
+        angle_dist = dict(zip(range(num_bins), [self.obstacles_view_radius] * num_bins))
 
         # get obstacles in radius
-        in_radius = filter(lambda obs: distance(obs, state.position) <= self.radius,
+        in_radius = filter(lambda obs: distance(obs, state.position) <= self.obstacles_view_radius,
                            self.obstacles)
 
         # get angle between heading and obstacles in radius.
         obs_dist_angle = \
-            [*map(lambda obs: Obstacle(position=obs, distance=distance(obs, state.position), angle=int(np.digitize(
+            [*map(lambda obs: ObstacleT(position=obs, distance=distance(obs, state.position), angle=int(np.digitize(
                 delta_heading_2d(state.position, state.orientation, obs), self.bins, right=True))), in_radius)]
 
         # sort and group by angle, using minimum distance if more than one obstacles lie on the same line.
@@ -159,11 +191,26 @@ class Simulator:
         return [angle_dist[i] for i in range(num_bins)]
 
     def reward(self, state) -> float:
+        """
+        reward for a given state
+        :param state: current state
+        :return: reward is equal to the dot product of velocity and unit vector in direction of the goal
+        (expressed in Body-fixed frame) and then divided by max velocity to normalize reward to be in the range [-1.0, 1.0],
+        then r is clipped to be in [0.0, 1] and then translated to finally be in the range [-1, 0.0]
+
+        if safe distance away from obstacles, then
+        r = (unit_vector(R[Earth->Body].(Position_goal[E] - position)) . velocity) / max_velocity
+        r = r.clip(0.0, 1) - 1
+
+        else
+
+        r = -max_episode_length
+        """
         goal_body = transform_to_body_frame(self.goal - state.position, state.orientation)
         unit_displacement = np.dot(unit(goal_body), transform_to_body_frame(state.linear_velocity, state.orientation))
 
         if min(self.obstacles_view(state)) < self.safe_distance:
-            return -self.episode_length
+            return -self.max_episode_length
 
         elif distance(self.goal, state.position) <= self.goal_margin:
             return 0.0
@@ -172,9 +219,19 @@ class Simulator:
             return np.clip(unit_displacement / self.default_speed, a_min=0.0, a_max=1.0) - 1.0
 
     def is_terminal(self, state) -> bool:
+        """
+        is_terminal
+        :param state: current state
+        :return: a boolean indicating whether given state is terminal or not
+        """
         return min(self.obstacles_view(state)) < self.safe_distance or distance(self.goal, state.position) < self.goal_margin
 
-    def generate_next_state(self, action):
+    def generate_next_state(self, action) -> StateT:
+        """
+        generates next state given some action
+        :param action: action to be applied to the current state
+        :return: new state after applying given action
+        """
         roll, pitch, _ = to_euler_angles(self.state.orientation)
         initial_state = np.concatenate((self.state.linear_velocity,
                                         self.state.angular_velocity, [roll, pitch],
@@ -192,10 +249,15 @@ class Simulator:
         return StateT(update=False, orientation=orientation, position=position, linear_velocity=linear_velocity,
                       angular_velocity=angular_velocity)
 
-    def update_state(self, state: StateT):
+    def _update_state(self, state: StateT):
         self.state = state
 
     def execute(self, actions) -> Tuple[np.ndarray, float, bool]:
+        """
+        executes an action in the environment.
+        :param actions: action to be applied.
+        :return: an ordered tuple containing next_state, is_terminal, reward.
+        """
         self.time_step += 1
 
         # perform action
@@ -203,7 +265,7 @@ class Simulator:
         state_vector = self.vectorize_state(next_state)
 
         # update current_state
-        self.update_state(next_state)
+        self._update_state(next_state)
 
         # generate reward and is_terminal
         r = self.reward(next_state)
@@ -211,9 +273,6 @@ class Simulator:
         terminal = self.is_terminal(next_state)
 
         return state_vector, terminal, r
-
-    def step(self, actions):
-        return self.execute(actions) + ({},)
 
     @property
     def states_dim(self):
@@ -226,13 +285,11 @@ class Simulator:
     def close(self):
         print('session is closed!')
 
-    def render(self, mode='human', close=False):
-        raise NotImplementedError()
-
 
 def main():
     environment = Simulator(model=joblib.load('models/nn-m.model'), frequency=10.0, safe_distance=8.0, goal_margin=8.0,
-                            default_speed=3.0, radius=30.0, episode_length=1000, environment_size=70.0)
+                            default_speed=3.0, obstacles_view_radius=30.0, max_episode_length=1000, environment_size=70.0,
+                            number_obstacles=0)
 
     with open('network.json', 'r') as fp:
         network_spec = json.load(fp=fp)
@@ -268,9 +325,9 @@ def main():
         return True
 
     runner.run(
-        timesteps=100000 * environment.episode_length,
+        timesteps=100000 * environment.max_episode_length,
         episodes=100000,
-        max_episode_timesteps=environment.episode_length,
+        max_episode_timesteps=environment.max_episode_length,
         deterministic=False,
         episode_finished=episode_finished
     )
@@ -281,31 +338,6 @@ def main():
         state, terminal, reward = environment.execute(action)
 
     runner.close()
-
-
-def keras_rl_impl():
-    environment = Simulator(model=joblib.load('models/nn-m.model'), frequency=10.0, safe_distance=8.0, goal_margin=8.0,
-                            default_speed=3.0, radius=30.0, episode_length=1000, environment_size=70.0)
-
-    model = Sequential()
-    model.add(Flatten(input_shape=(1,) + environment.states_dim['shape']))
-
-    model.add(Dense(128))
-    model.add(Activation('relu'))
-
-    model.add(Dense(environment.actions_dim['num_actions']))
-    model.add(Activation('linear'))
-    print(model.summary())
-
-    memory = SequentialMemory(limit=9000, window_length=1)
-    policy = BoltzmannQPolicy()
-
-    dqn = DQNAgent(model=model, nb_actions=environment.actions_dim['num_actions'], memory=memory, nb_steps_warmup=10,
-                   enable_dueling_network=True, dueling_type='avg', target_model_update=1e-2, policy=policy)
-
-    dqn.compile(Adam(lr=1e-3), metrics=['mae'])
-    dqn.fit(environment, nb_steps=50000000, visualize=False, verbose=0, nb_max_episode_steps=1000)
-    dqn.save_weights('dqn_{}_weights.h5f'.format(time.time()), overwrite=True)
 
 
 if __name__ == '__main__':

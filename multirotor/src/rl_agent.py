@@ -59,7 +59,7 @@ class RLAgent:
         return self._state
 
     def update_state(self):
-        s = self._state.update_state(self)
+        s = self._state._update_state(self)
 
         # HACK!
         #################
