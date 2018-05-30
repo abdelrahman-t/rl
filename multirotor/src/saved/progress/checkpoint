@@ -1,2 +1,4 @@
-model_checkpoint_path: "model.ckpt-41857187"
-all_model_checkpoint_paths: "model.ckpt-41857187"
+model_checkpoint_path: "model.ckpt-10619446"
+all_model_checkpoint_paths: "model.ckpt-10605118"
+all_model_checkpoint_paths: "../progress-10619446"
+all_model_checkpoint_paths: "model.ckpt-10619446"

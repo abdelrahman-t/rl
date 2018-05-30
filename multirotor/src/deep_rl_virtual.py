@@ -53,7 +53,7 @@ class Simulator:
         self.max_episode_length = max_episode_length
 
         self.time_step = 0
-        self.bins = np.linspace(-np.pi, np.pi, 9)
+        self.rays = np.linspace(-np.pi, np.pi, 9)
         self.goal, self.obstacles = None, None
         self.state = None
         self.episode = 0
@@ -154,7 +154,7 @@ class Simulator:
         """
         :return array of distances for nearest obstacles in view for each of the sensors.
         """
-        num_bins = len(self.bins)
+        num_bins = len(self.rays)
         angle_dist = dict(zip(range(num_bins), [self.obstacles_view_radius] * num_bins))
 
         # get obstacles in radius
@@ -164,7 +164,7 @@ class Simulator:
         # get angle between heading and obstacles in radius.
         obs_dist_angle = \
             [*map(lambda obs: ObstacleT(position=obs, distance=distance(obs, state.position), angle=int(np.digitize(
-                delta_heading_2d(state.position, state.orientation, obs), self.bins, right=True))), in_radius)]
+                delta_heading_2d(state.position, state.orientation, obs), self.rays, right=True))), in_radius)]
 
         # sort and group by angle, using minimum distance if more than one obstacles lie on the same line.
         obs_dist_angle.sort(key=lambda x: x.angle)
@@ -306,11 +306,13 @@ def main():
 
     runner.run(
         timesteps=100000 * environment.max_episode_length,
-        episodes=100000,
+        episodes=1000,
         max_episode_timesteps=environment.max_episode_length,
         deterministic=False,
         episode_finished=episode_finished
     )
+
+    agent.restore_model('saved/progress')
 
     terminal, state = False, environment.reset()
     while not terminal:

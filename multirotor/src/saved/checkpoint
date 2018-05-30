@@ -1,0 +1,3 @@
+model_checkpoint_path: "progress-10619446"
+all_model_checkpoint_paths: "progress/model.ckpt-10605118"
+all_model_checkpoint_paths: "progress-10619446"

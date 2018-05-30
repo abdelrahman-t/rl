@@ -39,7 +39,7 @@
     },
 
     "saver": {
-        "directory": "progress",
+        "directory": "saved/progress",
         "seconds": 600
     },
     "summarizer": {
