@@ -169,8 +169,8 @@ def preprocess_angles(angle):
 # angular acceleration is [ALPHAx, ALPHAy, ALPHAz]
 # -------------
 
-def integrate_trajectory_velocity_body(position, orientation, linear_velocities, angular_velocities, frequency):
-    for v, w, f in zip(linear_velocities, angular_velocities, frequency):
+def integrate_trajectory_velocity_body(position, orientation, linear_velocities_body, angular_velocities_body, frequency):
+    for v, w, f in zip(linear_velocities_body, angular_velocities_body, frequency):
         euler_rates = transform_body_rates_to_earth(w, orientation)
         linear_velocity_earth = transform_to_earth_frame(v, orientation)
 

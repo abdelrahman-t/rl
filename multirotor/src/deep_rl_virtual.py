@@ -10,7 +10,6 @@ import numpy as np
 from pyquaternion import Quaternion
 from sklearn.externals import joblib
 
-# loading model
 from tensorforce.agents import Agent
 from tensorforce.execution import Runner
 
@@ -28,8 +27,8 @@ class Simulator:
                         [0., 0., 1., 0.],
                         [0., 0., 0., 1.]])
 
-    def __init__(self, safe_distance: float, goal_margin: float, obstacles_view_radius: float, max_episode_length: int, model,
-                 environment_size: float, number_obstacles: int, default_speed: float = 3.0, frequency: float = 10.0):
+    def __init__(self, safe_distance: float, goal_margin: float, obstacles_view_radius: float, max_episode_length: int,
+                 model, environment_size: float, number_obstacles: int, default_speed: float = 3.0, frequency: float = 10.0):
         """
         creates a simulator instance.
         :param safe_distance: minimum safe distance to obstacles.
@@ -107,40 +106,34 @@ class Simulator:
     def vectorize_state(self, state: StateT) -> np.ndarray:
         """state (26, ):
             inertial:
-                position: position of multirotor. [0-2]
-                linear velocity: in body-fixed frame, meter/second [3-5]
-                angular velocity: in body-fixed frame, radians/second [6-8]
+                linear velocity: in body-fixed frame, meter/second [0-2]
+                angular velocity: in body-fixed frame, radians/second [3-5]
 
-                roll: expressed in radians [9]
-                pitch: expressed in radians [10]
-                yaw: expressed in radians [11]
+                roll: expressed in radians [6]
+                pitch: expressed in radians [7]
 
             goal:
-                delta heading: difference between agent's current heading and goal heading. expressed in radians [12].
-                distance to goal: distance from current position to goal position, expressed in meters [13].
-                goal position: goal position [14-16].
+                delta heading: difference between agent's current heading and goal heading. expressed in radians [8].
+                distance to goal: distance from current position to goal position, expressed in meters [9].
 
             obstacles_view:
-                distance to obstacles_view: expressed in meters [17-26]
+                distance to obstacles_view: expressed in meters [10-19]
         """
-        inertial = np.concatenate((state.position,
-                                   transform_to_body_frame(state.linear_velocity, state.orientation),
-                                   state.angular_velocity, to_euler_angles(state.orientation)))
-        goal = np.concatenate(
-            ([delta_heading_2d(state.position, state.orientation, self.goal), distance(state.position, self.goal)],
-             self.goal))
+        inertial = np.concatenate((state.linear_velocity_body,
+                                   state.angular_velocity_body, to_euler_angles(state.orientation)[:2]))
+        goal = [delta_heading_2d(state.position, state.orientation, self.goal), distance(state.position, self.goal)]
 
         return np.concatenate((inertial, goal))
 
     def reset(self) -> np.ndarray:
         """
-        resets environment to inital state, generates a new goal position, and obstacles if specified in the config.
+        resets environment to initial state, generates a new goal position, and obstacles if specified in the config.
         :return:
         """
         try:
             terminal_state = self.vectorize_state(self.state)
             print('episode: {ep} summary: heading error: {h}, distance to goal: {d}, total reward: {r}\n'
-                  .format(h=int(np.rad2deg(terminal_state[12])), d=int(terminal_state[13]),
+                  .format(h=int(np.rad2deg(terminal_state[8])), d=int(terminal_state[9]),
                           r=int(self.episode_total_reward), ep=self.episode))
 
         except AttributeError:
@@ -148,7 +141,8 @@ class Simulator:
 
         # generate initial state
         initial_state = StateT(update=False, orientation=Quaternion(euler_to_quaternion(roll=0.0, pitch=0.0, yaw=0.0)),
-                               position=[0.0, 0.0, -1.0], linear_velocity=[0.0, 0.0, 0.0], angular_velocity=[0.0, 0.0, 0.0])
+                               linear_velocity_body=[0.0, 0.0, 0.0], angular_velocity_body=[0.0, 0.0, 0.0],
+                               position=[0.0, 0.0, -1.0])
 
         # update current state
         self._update_state(initial_state)
@@ -199,15 +193,15 @@ class Simulator:
         then r is clipped to be in [0.0, 1] and then translated to finally be in the range [-1, 0.0]
 
         if safe distance away from obstacles, then
-        r = (unit_vector(R[Earth->Body].(Position_goal[E] - position)) . velocity) / max_velocity
-        r = r.clip(0.0, 1) - 1
+        r = (unit_vector(R[Earth->Body].(Position_goal[Earth] - position)) . velocity[Body]) / max_velocity
+        r = r.clip(0.0, 1.0) - 1.0
 
         else
 
         r = -max_episode_length
         """
         goal_body = transform_to_body_frame(self.goal - state.position, state.orientation)
-        unit_displacement = np.dot(unit(goal_body), transform_to_body_frame(state.linear_velocity, state.orientation))
+        unit_displacement = np.dot(unit(goal_body), state.linear_velocity_body)
 
         if min(self.obstacles_view(state)) < self.safe_distance:
             return -self.max_episode_length
@@ -233,21 +227,22 @@ class Simulator:
         :return: new state after applying given action
         """
         roll, pitch, _ = to_euler_angles(self.state.orientation)
-        initial_state = np.concatenate((self.state.linear_velocity,
-                                        self.state.angular_velocity, [roll, pitch],
+
+        initial_state = np.concatenate((self.state.linear_velocity_body,
+                                        self.state.angular_velocity_body, [roll, pitch],
                                         self.ACTIONS[action]))
 
         next_state = self.model.predict(initial_state.reshape(1, -1)).ravel()
 
-        orientation, position, linear_velocity, angular_velocity = \
+        orientation, position, linear_velocity_body, angular_velocity_body = \
             next(integrate_trajectory_velocity_body(position=self.state.position,
                                                     orientation=self.state.orientation,
-                                                    linear_velocities=[next_state[:3]],
-                                                    angular_velocities=[next_state[3:6]],
+                                                    linear_velocities_body=[next_state[:3]],
+                                                    angular_velocities_body=[next_state[3:6]],
                                                     frequency=[self.frequency]))
 
-        return StateT(update=False, orientation=orientation, position=position, linear_velocity=linear_velocity,
-                      angular_velocity=angular_velocity)
+        return StateT(update=False, orientation=orientation, position=position, linear_velocity_body=linear_velocity_body,
+                      angular_velocity_body=angular_velocity_body)
 
     def _update_state(self, state: StateT):
         self.state = state
@@ -276,7 +271,7 @@ class Simulator:
 
     @property
     def states_dim(self):
-        return dict(shape=(17,), type='float')
+        return dict(shape=(10,), type='float')
 
     @property
     def actions_dim(self):
@@ -297,16 +292,12 @@ def main():
     with open('config.json', 'r') as fp:
         config = json.load(fp=fp)
 
-    with open('reward_preprocessing.json', 'r') as fp:
-        reward_preprocessing = json.load(fp=fp)
-
     agent = Agent.from_spec(
         spec=config,
         kwargs=dict(
             states=environment.states_dim,
             actions=environment.actions_dim,
-            network=network_spec,
-            reward_preprocessing=reward_preprocessing)
+            network=network_spec)
     )
 
     runner = Runner(

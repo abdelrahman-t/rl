@@ -28,7 +28,7 @@ def verify_model(frequency, state):
 
         orientation, position, linear_velocity, angular_velocity = \
             next(integrate_trajectory_velocity_body(position=state.position, orientation=state.orientation,
-                                                    linear_velocities=[s1[:3]], angular_velocities=[s1[3:6]],
+                                                    linear_velocities_body=[s1[:3]], angular_velocities_body=[s1[3:6]],
                                                     frequency=[frequency]))
 
         state = StateT(orientation=orientation,

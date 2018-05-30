@@ -63,7 +63,7 @@ class State(GameState[int]):
 
         orientation, position, linear_velocity, angular_velocity = \
             next(integrate_trajectory_velocity_body(position=self.position, orientation=self.orientation,
-                                                    linear_velocities=[s1[:3]], angular_velocities=[s1[3:6]],
+                                                    linear_velocities_body=[s1[:3]], angular_velocities_body=[s1[3:6]],
                                                     frequency=[FREQUENCY]))
 
         disc = numpy.array([numpy.digitize(numpy.abs(linear_velocity), State.v_bins),

@@ -1,14 +1,14 @@
-
 [
     {
         "type": "dense",
-        "size": 500,
-        "activation": "relu"
+        "size": 32
     },
     {
         "type": "dense",
-        "size": 500,
-        "activation": "relu"
+        "size": 32
+    },
+    {
+        "type": "internal_lstm",
+        "size": 32
     }
 ]
-
