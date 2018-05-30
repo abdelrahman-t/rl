@@ -15,7 +15,7 @@ from tensorforce.execution import Runner
 
 from utilities import StateT
 from vector_math import transform_to_body_frame, to_euler_angles, distance, delta_heading_2d, unit, \
-    integrate_trajectory_velocity_body, euler_to_quaternion
+    integrate_trajectory_velocity_body, euler_to_quaternion, generate_random_point
 
 # obstacle type
 ObstacleT = NamedTuple('Obstacle', [('position', np.ndarray), ('distance', float), ('angle', float)])
@@ -59,23 +59,12 @@ class Simulator:
         self.episode = 0
         self.episode_total_reward = 0.0
 
-    def generate_random_point(self, radius: float):
-        # from https://programming.guide/random-point-within-circle.html
-        """
-        generate random point.
-        :param radius: generate a 3d point in a given radius.
-        :return: returns a 3d point.
-        """
-        angle = np.random.rand() * 2 * np.pi
-        r = radius * np.random.rand() ** 0.5
-        return np.array([r * np.cos(angle), r * np.sin(angle), -1.0])
-
     def generate_goal(self) -> numpy.ndarray:
         """
         generates goal.
         :return: new goal position np.array([x, y, z]).
         """
-        return self.generate_random_point(radius=self.environment_size)
+        return generate_random_point(radius=self.environment_size)
 
     def generate_obstacles(self, min_distance: float, number_obstacles: int) -> List[numpy.ndarray]:
         """
@@ -97,14 +86,14 @@ class Simulator:
             while distance(point, initial_position) < safe or \
                     distance(point, self.goal) < safe or \
                     min([*map(lambda obs: distance(point, obs), obstacles), float('inf')]) < min_distance:
-                point = self.generate_random_point(radius=self.environment_size)
+                point = generate_random_point(radius=self.environment_size)
 
             obstacles.append(point)
 
         return obstacles
 
     def vectorize_state(self, state: StateT) -> np.ndarray:
-        """state (26, ):
+        """state (20, ):
             inertial:
                 linear velocity: in body-fixed frame, meter/second [0-2]
                 angular velocity: in body-fixed frame, radians/second [3-5]

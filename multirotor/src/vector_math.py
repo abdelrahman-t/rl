@@ -1,12 +1,15 @@
 import numpy
 from pyquaternion import Quaternion
+from typing import Union, List, NewType, Tuple, Iterable
+
+QuaternionT = NewType('quaternion', Union[Quaternion, List, numpy.ndarray])
 
 
 # -------------
 # euler quaternion conversions
 # -------------
 
-def to_euler_angles(q):
+def to_euler_angles(q: QuaternionT) -> numpy.ndarray:
     ysqr = q[2] * q[2]
 
     t0 = +2.0 * (q[0] * q[1] + q[2] * q[3])
@@ -25,7 +28,7 @@ def to_euler_angles(q):
     return numpy.array([roll, pitch, yaw])
 
 
-def euler_to_quaternion(roll, pitch, yaw):
+def euler_to_quaternion(roll: float, pitch: float, yaw: float) -> Quaternion:
     quaternion = [0] * 4
     cosPhi_2 = numpy.cos(roll / 2)
     sinPhi_2 = numpy.sin(roll / 2)
@@ -50,17 +53,17 @@ def euler_to_quaternion(roll, pitch, yaw):
 # inertial, non-inertial frame transformations
 # -------------
 
-def transform_to_earth_frame(vector, q):
+def transform_to_earth_frame(vector: numpy.ndarray, q: QuaternionT) -> numpy.ndarray:
     _q = Quaternion(q)
     return _q.rotate(vector)
 
 
-def transform_to_body_frame(vector, q):
+def transform_to_body_frame(vector: numpy.ndarray, q: QuaternionT) -> numpy.ndarray:
     _q = Quaternion(q)
     return _q.inverse.rotate(vector)
 
 
-def transform_body_rates_to_earth(rates, q):
+def transform_body_rates_to_earth(rates: numpy.ndarray, q: QuaternionT) -> numpy.ndarray:
     roll, pitch, yaw = to_euler_angles(q)
     roll_rate_body, pitch_rate_body, yaw_rate_body = rates
 
@@ -73,7 +76,7 @@ def transform_body_rates_to_earth(rates, q):
     return numpy.array([roll_rate_earth, pitch_rate_earth, yaw_rate_earth])
 
 
-def transform_euler_rates_to_body(rates, q):
+def transform_euler_rates_to_body(rates: numpy.ndarray, q: QuaternionT) -> numpy.ndarray:
     roll, pitch, yaw = to_euler_angles(q)
     roll_rate_earth, pitch_rate_earth, yaw_rate_earth = rates
 
@@ -83,38 +86,57 @@ def transform_euler_rates_to_body(rates, q):
 
     return numpy.array([roll_rate_body, pitch_rate_body, yaw_rate_body])
 
+# -------------
+# miscellaneous
+# -------------
 
-def delta_heading_2d(position, q, vector_earth):
+
+def delta_heading_2d(position: numpy.ndarray, q: QuaternionT, vector_earth: numpy.ndarray) -> float:
+    # https://stackoverflow.com/questions/14066933/direct-way-of-computing-clockwise-angle-between-2-vectors/16544330?utm_med
+    # ium=organic&utm_source=google_rich_qa&utm_campaign=google_rich_qa
     x_axis = [1.0, 0.0]
     vector_body = transform_to_body_frame(vector_earth - position, q)[:2]
     return numpy.arctan2(numpy.linalg.det(numpy.column_stack((vector_body, x_axis))),
                          numpy.dot(vector_body, x_axis))
 
 
-def distance(p1, p2):
+def distance(p1: numpy.ndarray, p2: numpy.ndarray) -> float:
     return numpy.linalg.norm(p2 - p1)
 
 
-def unit(vector):
+def unit(vector: numpy.ndarray) -> float:
     return vector / numpy.linalg.norm(vector)
+
+
+def generate_random_point(radius: float, z: float=-1.0) -> numpy.ndarray:
+    # from https://programming.guide/random-point-within-circle.html
+    """
+    generate random point.
+    :param radius: generate a 3d point in a given radius with a fixed z.
+    :param z: z in generated random point.
+    :return: returns a 3d point.
+    """
+    angle = numpy.random.rand() * 2 * numpy.pi
+    r = radius * numpy.random.rand() ** 0.5
+    return numpy.array([r * numpy.cos(angle), r * numpy.sin(angle), z])
 
 
 # -------------
 # get average rates
 # -------------
 
-def get_average(m1, m0, frequency, wrap=lambda _: _):
+def get_average(m1: numpy.ndarray, m0: numpy.ndarray, frequency: float, wrap=lambda _: _) -> numpy.ndarray:
     average = list(map(wrap, (m1 - m0)))
     return numpy.array(average) * frequency
 
 
-def get_average_linear_velocity(position1, position0, frequency):
+def get_average_linear_velocity(position1: numpy.ndarray, position0: numpy.ndarray, frequency: float) -> numpy.ndarray:
     return get_average(m1=position1, m0=position0, frequency=frequency)
 
 
-def get_average_angular_velocity(q2, q1, frequency):
-    qDiff = q1.inverse * q2
-    axis, angle = qDiff.axis, qDiff.angle
+def get_average_angular_velocity(q2: QuaternionT, q1: QuaternionT, frequency: float) -> numpy.ndarray:
+    q_diff = q1.inverse * q2
+    axis, angle = q_diff.axis, q_diff.angle
     return axis, angle * frequency
 
 
@@ -122,54 +144,41 @@ def get_average_angular_velocity(q2, q1, frequency):
 # integration
 # -------------
 
-def integrate(initial, rate, frequency, wrap=lambda _: _):
+def integrate(initial: numpy.ndarray, rate: numpy.ndarray, frequency: float, wrap=lambda _: _) -> numpy.ndarray:
     integral = map(wrap, numpy.array(initial + rate / frequency))
     return numpy.array(list(integral))
 
 
-def get_axis_angle(vector):
+def get_axis_angle(vector: numpy.ndarray) -> Tuple[float, float]:
     x, y, z = vector
     magnitude = (x ** 2 + y ** 2 + z ** 2) ** 0.5
     return vector / magnitude, magnitude
 
 
-def integrate_orientation(q1, angular_velocity, frequency):
+def integrate_orientation(q1: QuaternionT, angular_velocity_earth: numpy.ndarray, frequency: float) -> Quaternion:
     q2 = Quaternion(q1)
-    q2.integrate(angular_velocity, 1 / frequency)
+    q2.integrate(angular_velocity_earth, 1 / frequency)
 
     return q2
 
 
-def integrate_position(initial_position, linear_velocity_earth, frequency):
+def integrate_position(initial_position: numpy.ndarray, linear_velocity_earth: numpy.ndarray,
+                       frequency: float) -> numpy.ndarray:
     return integrate(initial=initial_position, rate=linear_velocity_earth, frequency=frequency)
 
 
-# -------------
-# preprocessing
-# -------------
+def integrate_trajectory_velocity_body(position: numpy.ndarray, orientation: QuaternionT,
+                                       linear_velocities_body: Iterable, angular_velocities_body: Iterable,
+                                       frequency: Iterable) -> Tuple[Quaternion, numpy.ndarray, numpy.ndarray, numpy.ndarray]:
+    """
+    :param position: [x, y, z]
+    :param orientation: quaternion [w, x, y, z]
+    :param linear_velocities_body: [v_x, v_y, v_z] in body-fixed frame
+    :param angular_velocities_body: [w_x, w_y w_z] in body_fixed frame
+    :param frequency:
+    :return: (quaternion, position, linear velocity in body-fixed frame, angular velocity in body-fixed frame)
+    """
 
-def wrap_around_pi(angle):
-    return numpy.arctan2(numpy.sin(angle), numpy.cos(angle))
-
-
-def preprocess_angles(angle):
-    return numpy.array([numpy.sin(angle), numpy.cos(angle)])
-
-
-# -------------
-# integrate trajectory from accelerations
-# -------------
-# position is (x, y, z)
-# orientation is quaternion (w, x, y, z)
-
-# linear velocity is [Vx, Vy, Vz] in body
-# linear acceleration is [Ax, Ay, Az] in body
-
-# angular velocity is [Wx, Wy Wz]
-# angular acceleration is [ALPHAx, ALPHAy, ALPHAz]
-# -------------
-
-def integrate_trajectory_velocity_body(position, orientation, linear_velocities_body, angular_velocities_body, frequency):
     for v, w, f in zip(linear_velocities_body, angular_velocities_body, frequency):
         euler_rates = transform_body_rates_to_earth(w, orientation)
         linear_velocity_earth = transform_to_earth_frame(v, orientation)
@@ -183,3 +192,20 @@ def integrate_trajectory_velocity_body(position, orientation, linear_velocities_
                transform_euler_rates_to_body(euler_rates, new_orientation))
 
         orientation = new_orientation
+
+
+# -------------
+# preprocessing
+# -------------
+
+def wrap_around_pi(angle: float) -> float:
+    # https://stackoverflow.com/questions/4633177/c-how-to-wrap-a-float-to-the-interval-pi-pi?utm_medium=organic&utm_source=
+    # google_rich_qa&utm_campaign=google_rich_qa
+    return numpy.arctan2(numpy.sin(angle), numpy.cos(angle))
+
+
+def preprocess_angles(angle: float) -> float:
+    return numpy.array([numpy.sin(angle), numpy.cos(angle)])
+
+
+
