@@ -39,11 +39,11 @@
     },
 
     "saver": {
-        "directory": "saved/progress",
+        "directory": "saved/progress_with_obstacles",
         "seconds": 600
     },
     "summarizer": {
-        "directory": "progress_summary",
+        "directory": "progress_summary_with_obstacles",
         "labels": [],
         "seconds": 120
     },

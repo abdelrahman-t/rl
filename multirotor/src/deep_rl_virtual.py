@@ -53,7 +53,7 @@ class Simulator:
         self.max_episode_length = max_episode_length
 
         self.time_step = 0
-        self.rays = np.linspace(-np.pi, np.pi, 9)
+        self.rays = np.linspace(-np.pi, np.pi, 13)
         self.goal, self.obstacles = None, None
         self.state = None
         self.episode = 0
@@ -76,15 +76,14 @@ class Simulator:
         """
         obstacles = [np.array([float('inf'), float('inf'), float('inf')])]
         initial_position = np.array([0.0, 0.0, -1.0])
-        safe = self.safe_distance + self.default_speed
 
         for i in range(number_obstacles):
-            # obstacle must be more than safe_distance away from starting position OR
-            # obstacle must be more than min_distance away from goal OR
+            # obstacle must be more than min_distance away from starting position AND
+            # obstacle must be more than min_distance away from goal AND
             # obstacle must be more than min_distance away from any other obstacle.
             point = initial_position
-            while distance(point, initial_position) < safe or \
-                    distance(point, self.goal) < safe or \
+            while distance(point, initial_position) < min_distance or \
+                    distance(point, self.goal) < min_distance or \
                     min([*map(lambda obs: distance(point, obs), obstacles), float('inf')]) < min_distance:
                 point = generate_random_point(radius=self.environment_size)
 
@@ -93,7 +92,7 @@ class Simulator:
         return obstacles
 
     def vectorize_state(self, state: StateT) -> np.ndarray:
-        """state (20, ):
+        """state (22, ):
             inertial:
                 linear velocity: in body-fixed frame, meter/second [0-2]
                 angular velocity: in body-fixed frame, radians/second [3-5]
@@ -106,13 +105,13 @@ class Simulator:
                 distance to goal: distance from current position to goal position, expressed in meters [9].
 
             obstacles_view:
-                distance to obstacles_view: expressed in meters [10-19]
+                distance to obstacles_view: expressed in meters [10-21]
         """
         inertial = np.concatenate((state.linear_velocity_body,
                                    state.angular_velocity_body, to_euler_angles(state.orientation)[:2]))
         goal = [delta_heading_2d(state.position, state.orientation, self.goal), distance(state.position, self.goal)]
 
-        return np.concatenate((inertial, goal))
+        return np.concatenate((inertial, goal, self.obstacles_view(state)))
 
     def reset(self) -> np.ndarray:
         """
@@ -121,9 +120,13 @@ class Simulator:
         """
         try:
             terminal_state = self.vectorize_state(self.state)
-            print('episode: {ep} summary: heading error: {h}, distance to goal: {d}, total reward: {r}\n'
-                  .format(h=int(np.rad2deg(terminal_state[8])), d=int(terminal_state[9]),
-                          r=int(self.episode_total_reward), ep=self.episode))
+            template = 'episode {ep} summary: heading error: {head}, remaining distance to goal: {dist}, ' \
+                       'total reward: {r}\nobstacles view: {obs}\n----------\n'
+
+            print(template.format(head=int(np.rad2deg(terminal_state[8])),
+                                  dist=int(distance(self.state.position, self.goal)),
+                                  r=int(self.episode_total_reward), ep=self.episode,
+                                  obs=np.round(self.obstacles_view(self.state))))
 
         except AttributeError:
             pass
@@ -141,7 +144,7 @@ class Simulator:
 
         # generate obstacles
         # goal must be generated first!
-        self.obstacles = self.generate_obstacles(min_distance=16.0, number_obstacles=self.number_obstacles)
+        self.obstacles = self.generate_obstacles(min_distance=21.0, number_obstacles=self.number_obstacles)
 
         # increment episode
         # reset total reward for the new episode
@@ -169,9 +172,14 @@ class Simulator:
         # sort and group by angle, using minimum distance if more than one obstacles lie on the same line.
         obs_dist_angle.sort(key=lambda x: x.angle)
         for key, group in groupby(obs_dist_angle, key=lambda x: x.angle):
-            angle_dist[key] = int(min(angle_dist[key], min(map(itemgetter(1), group))))
+            angle_dist[key] = min(angle_dist[key], min(map(itemgetter(1), group)))
 
-        return [angle_dist[i] for i in range(num_bins)]
+        view = [angle_dist[i] for i in range(num_bins)]
+
+        # merge pi and -pi into the same slot
+        view[0] = min(view[0], view[-1])
+
+        return view[:-1]
 
     def reward(self, state) -> float:
         """
@@ -193,9 +201,9 @@ class Simulator:
         unit_displacement = np.dot(unit(goal_body), state.linear_velocity_body)
 
         if min(self.obstacles_view(state)) < self.safe_distance:
-            return -self.max_episode_length
+            return -2.0 * self.max_episode_length
 
-        elif distance(self.goal, state.position) <= self.goal_margin:
+        elif distance(self.goal, state.position) < self.goal_margin:
             return 0.0
 
         else:
@@ -260,7 +268,7 @@ class Simulator:
 
     @property
     def states_dim(self):
-        return dict(shape=(10,), type='float')
+        return dict(shape=(22,), type='float')
 
     @property
     def actions_dim(self):
@@ -272,8 +280,8 @@ class Simulator:
 
 def main():
     environment = Simulator(model=joblib.load('models/nn-m.model'), frequency=10.0, safe_distance=8.0, goal_margin=8.0,
-                            default_speed=3.0, obstacles_view_radius=30.0, max_episode_length=1000, environment_size=70.0,
-                            number_obstacles=0)
+                            default_speed=3.0, obstacles_view_radius=30.0, max_episode_length=1200, environment_size=70.0,
+                            number_obstacles=20)
 
     with open('network.json', 'r') as fp:
         network_spec = json.load(fp=fp)
@@ -297,22 +305,18 @@ def main():
 
     def episode_finished(r):
         sps = r.timestep / (time.time() - r.start_time)
-        print("Finished episode {ep} Steps Per Second {sps}".format(ep=r.episode, sps=sps))
-        print("Episode reward: {}".format(r.episode_rewards[-1]))
-        print("Average of last 500 rewards: {}".format(sum(r.episode_rewards[-500:]) / 500))
-        print("Average of last 100 rewards: {}".format(sum(r.episode_rewards[-100:]) / 100))
-        print("----------\n")
+        print("Finished episode {ep} steps per second {sps}".format(ep=r.episode, sps=int(sps)))
         return True
 
     runner.run(
         timesteps=100000 * environment.max_episode_length,
-        episodes=1000,
+        episodes=50000,
         max_episode_timesteps=environment.max_episode_length,
         deterministic=False,
         episode_finished=episode_finished
     )
 
-    agent.restore_model('saved/progress')
+    # agent.restore_model('saved/progress')
 
     terminal, state = False, environment.reset()
     while not terminal:
