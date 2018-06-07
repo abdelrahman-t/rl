@@ -53,7 +53,7 @@ class Simulator:
         self.max_episode_length = max_episode_length
 
         self.time_step = 0
-        self.rays = np.linspace(-np.pi, np.pi, 13)
+        self.rays = np.linspace(-np.pi, np.pi, 25)
         self.goal, self.obstacles = None, None
         self.state = None
         self.episode = 0
@@ -76,23 +76,31 @@ class Simulator:
         """
         obstacles = [np.array([float('inf'), float('inf'), float('inf')])]
         initial_position = np.array([0.0, 0.0, -1.0])
+        count = 0
 
-        for i in range(number_obstacles):
+        while count < number_obstacles:
             # obstacle must be more than min_distance away from starting position AND
             # obstacle must be more than min_distance away from goal AND
             # obstacle must be more than min_distance away from any other obstacle.
-            point = initial_position
+
+            point, trials = initial_position, 0
             while distance(point, initial_position) < min_distance or \
                     distance(point, self.goal) < min_distance or \
                     min([*map(lambda obs: distance(point, obs), obstacles), float('inf')]) < min_distance:
+
+                if trials == 10:
+                    obstacles.pop()
+
                 point = generate_random_point(radius=self.environment_size)
+                trials += 1
 
             obstacles.append(point)
+            count += 1
 
         return obstacles
 
     def vectorize_state(self, state: StateT) -> np.ndarray:
-        """state (22, ):
+        """state (35, ):
             inertial:
                 linear velocity: in body-fixed frame, meter/second [0-2]
                 angular velocity: in body-fixed frame, radians/second [3-5]
@@ -105,7 +113,7 @@ class Simulator:
                 distance to goal: distance from current position to goal position, expressed in meters [9].
 
             obstacles_view:
-                distance to obstacles_view: expressed in meters [10-21]
+                distance to obstacles_view: expressed in meters [10-34]
         """
         inertial = np.concatenate((state.linear_velocity_body,
                                    state.angular_velocity_body, to_euler_angles(state.orientation)[:2]))
@@ -123,13 +131,23 @@ class Simulator:
             template = 'episode {ep} summary: heading error: {head}, remaining distance to goal: {dist}, ' \
                        'total reward: {r}\nobstacles view: {obs}\n----------\n'
 
+            obs_distance = min(self.obstacles_view(self.state))
+            goal_distance = distance(np.zeros(3), self.goal)
+
             print(template.format(head=int(np.rad2deg(terminal_state[8])),
-                                  dist=int(distance(self.state.position, self.goal)),
+                                  dist=(int(distance(self.state.position, self.goal)), int(goal_distance)),
                                   r=int(self.episode_total_reward), ep=self.episode,
-                                  obs=np.round(self.obstacles_view(self.state))))
+                                  obs='COLLISION!!!' if obs_distance <= self.safe_distance else int(obs_distance)))
 
         except AttributeError:
             pass
+
+        # generate goal
+        self.goal = self.generate_goal()
+
+        # generate obstacles
+        # goal must be generated first!
+        self.obstacles = self.generate_obstacles(min_distance=22.0, number_obstacles=self.number_obstacles)
 
         # generate initial state
         initial_state = StateT(update=False, orientation=Quaternion(euler_to_quaternion(roll=0.0, pitch=0.0, yaw=0.0)),
@@ -139,15 +157,9 @@ class Simulator:
         # update current state
         self._update_state(initial_state)
 
-        # generate goal
-        self.goal = self.generate_goal()
-
-        # generate obstacles
-        # goal must be generated first!
-        self.obstacles = self.generate_obstacles(min_distance=21.0, number_obstacles=self.number_obstacles)
-
         # increment episode
         # reset total reward for the new episode
+        self.time_step = 0
         self.episode += 1
         self.episode_total_reward = 0.0
 
@@ -174,12 +186,7 @@ class Simulator:
         for key, group in groupby(obs_dist_angle, key=lambda x: x.angle):
             angle_dist[key] = min(angle_dist[key], min(map(itemgetter(1), group)))
 
-        view = [angle_dist[i] for i in range(num_bins)]
-
-        # merge pi and -pi into the same slot
-        view[0] = min(view[0], view[-1])
-
-        return view[:-1]
+        return [angle_dist[i] for i in range(num_bins)]
 
     def reward(self, state) -> float:
         """
@@ -187,7 +194,7 @@ class Simulator:
         :param state: current state
         :return: reward is equal to the dot product of velocity and unit vector in direction of the goal
         (expressed in Body-fixed frame) and then divided by max velocity to normalize reward to be in the range [-1.0, 1.0],
-        then r is clipped to be in [0.0, 1] and then translated to finally be in the range [-1, 0.0]
+        then r is clipped to be in [0.0, 1.0]
 
         if safe distance away from obstacles, then
         r = (unit_vector(R[Earth->Body].(Position_goal[Earth] - position)) . velocity[Body]) / max_velocity
@@ -201,13 +208,9 @@ class Simulator:
         unit_displacement = np.dot(unit(goal_body), state.linear_velocity_body)
 
         if min(self.obstacles_view(state)) < self.safe_distance:
-            return -2.0 * self.max_episode_length
+            return -250.0
 
-        elif distance(self.goal, state.position) < self.goal_margin:
-            return 0.0
-
-        else:
-            return np.clip(unit_displacement / self.default_speed, a_min=0.0, a_max=1.0) - 1.0
+        return np.clip(unit_displacement / self.default_speed, a_min=0.0, a_max=1.0)
 
     def is_terminal(self, state) -> bool:
         """
@@ -268,7 +271,7 @@ class Simulator:
 
     @property
     def states_dim(self):
-        return dict(shape=(22,), type='float')
+        return dict(shape=(35,), type='float')
 
     @property
     def actions_dim(self):
@@ -280,8 +283,8 @@ class Simulator:
 
 def main():
     environment = Simulator(model=joblib.load('models/nn-m.model'), frequency=10.0, safe_distance=8.0, goal_margin=8.0,
-                            default_speed=3.0, obstacles_view_radius=30.0, max_episode_length=1200, environment_size=70.0,
-                            number_obstacles=20)
+                            default_speed=3.0, obstacles_view_radius=30.0, max_episode_length=500, environment_size=50,
+                            number_obstacles=15)
 
     with open('network.json', 'r') as fp:
         network_spec = json.load(fp=fp)
@@ -306,6 +309,9 @@ def main():
     def episode_finished(r):
         sps = r.timestep / (time.time() - r.start_time)
         print("Finished episode {ep} steps per second {sps}".format(ep=r.episode, sps=int(sps)))
+        # print("Average of last 500 rewards: {}".format(sum(r.episode_rewards[-500:]) / 500))
+        # print("Average of last 100 rewards: {}".format(sum(r.episode_rewards[-100:]) / 100))
+
         return True
 
     runner.run(

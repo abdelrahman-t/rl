@@ -1,14 +1,14 @@
 [
     {
         "type": "dense",
-        "size": 128
+        "size": 450
     },
     {
         "type": "dense",
-        "size": 128
+        "size": 450
     },
     {
         "type": "internal_lstm",
-        "size": 128
+        "size": 450
     }
 ]

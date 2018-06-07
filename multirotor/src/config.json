@@ -3,7 +3,7 @@
 
     "update_mode": {
         "unit": "episodes",
-        "batch_size": 10,
+        "batch_size": 100,
         "frequency": 10
     },
     "memory": {
@@ -27,7 +27,7 @@
     "baseline_mode": "states",
     "baseline": {
         "type": "mlp",
-        "sizes": [32, 32]
+        "sizes": [64, 64]
     },
     "baseline_optimizer": {
         "type": "multi_step",
@@ -37,13 +37,12 @@
         },
         "num_steps": 5
     },
-
     "saver": {
         "directory": "saved/progress_with_obstacles",
         "seconds": 600
     },
     "summarizer": {
-        "directory": "progress_summary_with_obstacles",
+        "directory": null,
         "labels": [],
         "seconds": 120
     },
